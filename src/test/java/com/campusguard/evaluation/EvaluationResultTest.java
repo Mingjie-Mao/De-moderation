@@ -1,9 +1,12 @@
 package com.campusguard.evaluation;
 
 import static com.campusguard.moderation.ModerationDecision.ALLOW;
+import static com.campusguard.moderation.ModerationDecision.REMOVE;
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.campusguard.moderation.ModerationDecision;
 import java.util.List;
+import java.util.Map;
 import org.junit.jupiter.api.Test;
 
 class EvaluationResultTest {
@@ -67,6 +70,68 @@ class EvaluationResultTest {
         assertThat(resultWithLatencies(5).totalPromptTokens()).isEmpty();
     }
 
+    /**
+     * The point of the split: one overall number cannot say the average is made
+     * of a half the engine handles and a half it does not.
+     */
+    @Test
+    void splitsTheScoreByAnyPropertyOfASample() {
+        EvaluationResult result = resultOf(
+                judged("a", "en", ALLOW, ALLOW),
+                judged("b", "en", REMOVE, REMOVE),
+                judged("c", "zh", REMOVE, ALLOW),
+                judged("d", "zh", REMOVE, ALLOW));
+
+        Map<String, ConfusionMatrix> byLanguage = result.matricesBy(SampleOutcome::language);
+
+        assertThat(byLanguage.get("en").accuracy()).isEqualTo(1.0);
+        assertThat(byLanguage.get("zh").accuracy()).isZero();
+        assertThat(byLanguage.get("zh").total()).isEqualTo(2);
+    }
+
+    /** Sorted, so two runs of one dataset produce tables that can be read side by side. */
+    @Test
+    void ordersSlicesByKeyRatherThanByFirstAppearance() {
+        EvaluationResult result = resultOf(
+                judged("a", "zh", ALLOW, ALLOW),
+                judged("b", "en", ALLOW, ALLOW));
+
+        assertThat(result.matricesBy(SampleOutcome::language).keySet()).containsExactly("en", "zh");
+    }
+
+    /**
+     * A timeout says nothing about the sample it happened on, so it must not
+     * make that sample's slice look worse — the same rule the headline score
+     * already follows.
+     */
+    @Test
+    void leavesFailedCallsOutOfEverySlice() {
+        EvaluationResult result = resultOf(
+                judged("a", "zh", ALLOW, ALLOW),
+                failed("b", "zh"));
+
+        assertThat(result.matricesBy(SampleOutcome::language).get("zh").total()).isEqualTo(1);
+    }
+
+    private EvaluationResult resultOf(SampleOutcome... outcomes) {
+        return new EvaluationResult(
+                "test-engine", "test-dataset", EngineRunStatus.OK, new ConfusionMatrix(),
+                List.of(outcomes), null, null);
+    }
+
+    private SampleOutcome judged(
+            String id, String language, ModerationDecision expected, ModerationDecision actual) {
+        return new SampleOutcome(
+                id, null, "NORMAL", language, SampleProvenance.AUTHORED, expected, actual, 0.9, List.of(),
+                "ok", "excerpt", 100, null, null, null);
+    }
+
+    private SampleOutcome failed(String id, String language) {
+        return new SampleOutcome(
+                id, null, "NORMAL", language, SampleProvenance.AUTHORED, ALLOW, null, 0, List.of(),
+                null, "excerpt", 100, null, null, "timed out");
+    }
+
     private EvaluationResult resultWithLatencies(long... latenciesMicros) {
         List<SampleOutcome> outcomes = new java.util.ArrayList<>();
         for (int i = 0; i < latenciesMicros.length; i++) {
@@ -78,7 +143,7 @@ class EvaluationResultTest {
 
     private SampleOutcome outcome(String id, long latencyMicros, String error) {
         return new SampleOutcome(
-                id, null, "NORMAL", SampleProvenance.AUTHORED, ALLOW, error == null ? ALLOW : null, 0.9, List.of(),
+                id, null, "NORMAL", "en", SampleProvenance.AUTHORED, ALLOW, error == null ? ALLOW : null, 0.9, List.of(),
                 "ok", "excerpt", latencyMicros, null, null, error);
     }
 }

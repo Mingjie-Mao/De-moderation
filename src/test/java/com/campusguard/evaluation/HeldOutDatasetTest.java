@@ -105,7 +105,10 @@ class HeldOutDatasetTest {
     void coversBothLanguagesTheForumRunsIn() throws IOException {
         List<LabelledSample> samples = load(HELD_OUT);
 
-        long chinese = samples.stream().filter(sample -> hasHanCharacter(sample.body())).count();
+        // Through LabelledSample rather than a check of its own: this assertion
+        // and the report's language breakdown have to agree about what Chinese
+        // is, or the set guarantees a balance the report does not measure.
+        long chinese = samples.stream().filter(sample -> sample.language().equals("zh")).count();
 
         assertThat(chinese).isGreaterThan(samples.size() / 4);
         assertThat(samples.size() - chinese).isGreaterThan(samples.size() / 4);
@@ -148,8 +151,4 @@ class HeldOutDatasetTest {
         return (sample.body() == null ? "" : sample.body()).replaceAll("\\s+", " ").trim();
     }
 
-    private boolean hasHanCharacter(String text) {
-        return text != null && text.codePoints().anyMatch(codePoint ->
-                Character.UnicodeScript.of(codePoint) == Character.UnicodeScript.HAN);
-    }
 }

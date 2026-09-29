@@ -7,12 +7,16 @@ import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.OptionalInt;
 import org.springframework.stereotype.Component;
 
 /** Renders a run as the markdown that goes in {@code docs/evaluation.md}. */
 @Component
 public class EvaluationReportWriter {
+
+    /** Below this a slice's macro-F1 is noise; see {@link #renderStratified}. */
+    private static final int MIN_SAMPLES_FOR_F1 = 20;
 
     private static final int MAX_ROWS_PER_SECTION = 25;
 
@@ -369,8 +373,66 @@ public class EvaluationReportWriter {
         out.append('\n');
 
         renderBySource(out, result);
+        renderStratified(out, result, "Scored separately by the language the sample is written in:",
+                "language", SampleOutcome::language);
+        renderStratified(out, result, "Scored separately by editorial category:",
+                "category", SampleOutcome::category);
         renderMatrix(out, result);
         renderMisses(out, result);
+    }
+
+    /**
+     * One slice per value of some property of the samples.
+     *
+     * <p>An overall score can only say an engine is good on average, and an
+     * average is exactly where a part it cannot handle goes to hide. These tables
+     * exist so that a model which is fine in English and broken in Chinese reads
+     * as broken in Chinese rather than as slightly worse overall.
+     *
+     * <p>Nothing is printed when the dimension has only one value, because that
+     * table would be the headline number with extra steps.
+     *
+     * @param dimension what to split on; a null value slices under "unknown"
+     *     rather than being dropped, so samples missing the property stay visible
+     */
+    private void renderStratified(
+            StringBuilder out,
+            EvaluationResult result,
+            String heading,
+            String columnName,
+            java.util.function.Function<SampleOutcome, String> dimension) {
+
+        Map<String, ConfusionMatrix> slices = result.matricesBy(dimension);
+        if (slices.size() < 2) {
+            return;
+        }
+
+        out.append(heading).append("\n\n");
+        out.append("| ").append(columnName).append(" | n | accuracy | macro-F1 |\n|---|---|---|---|\n");
+
+        boolean anySmall = false;
+        for (Map.Entry<String, ConfusionMatrix> slice : slices.entrySet()) {
+            ConfusionMatrix matrix = slice.getValue();
+            // Below this a macro-F1 is an average over classes with one or two
+            // members each, which moves by a tenth when a single sample changes
+            // and reads as a difference between engines when it is not one.
+            boolean enoughForF1 = matrix.total() >= MIN_SAMPLES_FOR_F1;
+            anySmall |= !enoughForF1;
+
+            out.append("| ").append(slice.getKey())
+                    .append(" | ").append(matrix.total())
+                    .append(" | ").append(decimal(matrix.accuracy()))
+                    .append(" | ").append(enoughForF1 ? decimal(matrix.macroF1()) : "—")
+                    .append(" |\n");
+        }
+        out.append("\n");
+
+        if (anySmall) {
+            out.append("Macro-F1 is left out where a slice holds fewer than ")
+                    .append(MIN_SAMPLES_FOR_F1)
+                    .append(" samples: averaged over three classes that few, it moves by a tenth\n")
+                    .append("when one sample changes.\n\n");
+        }
     }
 
     private void renderBySource(StringBuilder out, EvaluationResult result) {

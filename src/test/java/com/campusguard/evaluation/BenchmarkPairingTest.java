@@ -68,7 +68,7 @@ class BenchmarkPairingTest {
 
     private EvaluationResult named(String engine) {
         SampleOutcome outcome = new SampleOutcome(
-                "s1", null, "NORMAL", SampleProvenance.AUTHORED, REMOVE, ALLOW, 0.8, List.of(), "because",
+                "s1", null, "NORMAL", "en", SampleProvenance.AUTHORED, REMOVE, ALLOW, 0.8, List.of(), "because",
                 "excerpt", 100, null, null, null);
         return new EvaluationResult(
                 engine, "dataset", EngineRunStatus.OK, new ConfusionMatrix(), List.of(outcome), null, null);

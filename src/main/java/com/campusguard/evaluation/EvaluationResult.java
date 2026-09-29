@@ -6,6 +6,8 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.OptionalInt;
+import java.util.TreeMap;
+import java.util.function.Function;
 
 /**
  * What one engine scored on one dataset, plus what it cost to find out.
@@ -53,6 +55,30 @@ public record EvaluationResult(
                 .filter(outcome -> !outcome.failed() && outcome.provenance() == provenance)
                 .forEach(outcome -> restricted.record(outcome.expected(), outcome.actual()));
         return restricted;
+    }
+
+    /**
+     * The same scoring, split by any property of a sample.
+     *
+     * <p>One overall number can only say an engine is good on average. It cannot
+     * say the average is made of a part it handles and a part it does not, and a
+     * corpus that is two thirds English will report a model that fails on Chinese
+     * as slightly worse rather than as broken on a third of the traffic.
+     *
+     * <p>Sorted by key rather than by first appearance, so two runs of the same
+     * dataset produce tables that can be read side by side.
+     *
+     * <p>Failed calls are excluded, like everywhere else: a timeout says nothing
+     * about the sample it happened on.
+     */
+    public Map<String, ConfusionMatrix> matricesBy(Function<SampleOutcome, String> dimension) {
+        Map<String, ConfusionMatrix> byKey = new TreeMap<>();
+        outcomes.stream()
+                .filter(outcome -> !outcome.failed())
+                .forEach(outcome -> byKey
+                        .computeIfAbsent(String.valueOf(dimension.apply(outcome)), key -> new ConfusionMatrix())
+                        .record(outcome.expected(), outcome.actual()));
+        return byKey;
     }
 
     /**

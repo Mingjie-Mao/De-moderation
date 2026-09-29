@@ -204,6 +204,7 @@ public class EvaluationRunner {
                 sample.id(),
                 sample.pairId(),
                 sample.category(),
+                sample.language(),
                 sample.provenance(),
                 sample.expected(),
                 verdict == null ? null : verdict.decision(),

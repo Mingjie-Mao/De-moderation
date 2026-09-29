@@ -205,13 +205,13 @@ class EngineRunsTest {
 
     private SampleOutcome outcome(String id, ModerationDecision expected, ModerationDecision actual, Integer tokens) {
         return new SampleOutcome(
-                id, null, "NORMAL", SampleProvenance.AUTHORED, expected, actual, 0.9, List.of(), "because",
+                id, null, "NORMAL", "en", SampleProvenance.AUTHORED, expected, actual, 0.9, List.of(), "because",
                 "excerpt", 1000, tokens, null, null);
     }
 
     private SampleOutcome failedOutcome(String id, ModerationDecision expected) {
         return new SampleOutcome(
-                id, null, "NORMAL", SampleProvenance.AUTHORED, expected, null, 0, List.of(), null, "excerpt",
+                id, null, "NORMAL", "en", SampleProvenance.AUTHORED, expected, null, 0, List.of(), null, "excerpt",
                 1000, null, null, "timed out");
     }
 }

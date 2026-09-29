@@ -89,7 +89,14 @@ extra call.
 ## By language
 
 The forum runs in English and Chinese, and so does the dataset — 122 English
-samples to 70 Chinese. Scored separately from `evaluation-samples.csv`:
+samples to 70 Chinese.
+
+These figures were originally worked out by hand from `evaluation-samples.csv`,
+which is why they covered one dataset and stopped being true the moment a prompt
+changed. The harness now produces the split itself: every report carries a
+language table, a category table and the source table below it, and
+`evaluation.json` carries the same under `strata`. A breakdown nobody has to
+remember to compute is one that cannot quietly go stale.
 
 | | n | Accuracy | ALLOW | REMOVE | ESCALATE |
 |---|---|---|---|---|---|
@@ -212,6 +219,23 @@ range across runs, which is this harness's own precision.
 | `keyword-v1` | 0.217 ±0.000 | 1.000 | 0.042 | 0.000 | **0.000** | 0 / 72 |
 | `gemini-3.5-flash-lite/v1` | 0.597 ±0.016 | 0.964 | 1.000 | 0.067 | 0.457 | 2 / 72 |
 | `gemini-3.5-flash-lite/v2` | **0.984** ±0.003 | 0.964 | 1.000 | **1.000** | **0.972** | 0 / 72 |
+
+Split by language, from `evaluation-heldout-samples.csv` — 28 Chinese samples to
+44 English. Accuracy rather than macro-F1, because a 28-sample slice divided
+three ways is too thin for an F1 to mean much:
+
+| | Chinese (28) | English (44) |
+|---|---|---|
+| `keyword-v1` | 0.429 | 0.386 |
+| `gemini-3.5-flash-lite/v1` | 0.679 | 0.744 |
+| `gemini-3.5-flash-lite/v2` | **1.000** | 0.977 |
+
+`v1` was the weaker half in Chinese by 0.065; `v2` is not weaker in Chinese at
+all, and its single error on this set is an English one. So the prompt rewrite
+closed a language gap as well as an ESCALATE one — which nothing in the headline
+table says, and which is the argument for the harness producing this split
+itself rather than leaving it to be worked out by hand afterwards, as this table
+was.
 
 `gemini-3.5-flash-lite/v3` had no row here. A three-run benchmark costs 219 model
 calls per engine and the free tier allows 500 a day, so the run reached its

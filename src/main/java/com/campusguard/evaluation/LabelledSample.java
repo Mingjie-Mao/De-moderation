@@ -54,4 +54,30 @@ public record LabelledSample(
     public boolean paired() {
         return pairId != null && !pairId.isBlank();
     }
+
+    /**
+     * Which script this sample is written in, as a two-letter tag.
+     *
+     * <p>Derived rather than stored, so adding it did not mean editing every
+     * hand-written sample in two datasets, and so it cannot drift from the text
+     * it describes.
+     *
+     * <p>Deliberately crude: the presence of a Han character, not language
+     * identification. This corpus is Chinese and English and nothing else, and a
+     * real detector would be a dependency and a second thing that can be wrong.
+     * A sample mixing scripts counts as Chinese, which is the right answer for
+     * the question this is asked: whether an engine handles the non-English half
+     * as well as the English one.
+     *
+     * <p>Title as well as body, unlike the check this replaced in
+     * {@code HeldOutDatasetTest}: a Chinese title over an English quotation is
+     * still a sample a Chinese-speaking reviewer would be shown.
+     */
+    public String language() {
+        String text = (title() == null ? "" : title()) + (body() == null ? "" : body());
+        return text.codePoints().anyMatch(codePoint ->
+                        Character.UnicodeScript.of(codePoint) == Character.UnicodeScript.HAN)
+                ? "zh"
+                : "en";
+    }
 }

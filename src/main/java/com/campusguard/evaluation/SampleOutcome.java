@@ -14,6 +14,10 @@ import java.util.List;
  *
  * @param pairId carried through from the sample so pairs can be scored as units
  *     after the run, without the runner having to know what a pair is
+ * @param language carried through so the report can score the two halves of a
+ *     bilingual corpus separately. Carried rather than re-derived here, because
+ *     {@code excerpt} is truncated to ninety characters and a long English
+ *     preamble on a Chinese post would make this say the wrong thing
  * @param actual null when the call itself failed, which is distinct from the
  *     engine answering wrongly and must not be counted as a wrong answer
  * @param error null on success; set when the engine threw for this sample
@@ -22,6 +26,7 @@ public record SampleOutcome(
         String sampleId,
         String pairId,
         String category,
+        String language,
         SampleProvenance provenance,
         ModerationDecision expected,
         ModerationDecision actual,

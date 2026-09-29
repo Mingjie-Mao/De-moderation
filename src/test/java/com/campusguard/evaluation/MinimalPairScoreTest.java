@@ -124,7 +124,7 @@ class MinimalPairScoreTest {
     private SampleOutcome outcome(
             String id, String pairId, ModerationDecision expected, ModerationDecision actual, String error) {
         return new SampleOutcome(
-                id, pairId, "NORMAL", SampleProvenance.AUTHORED, expected, actual, 0.9, List.of(), "because",
+                id, pairId, "NORMAL", "en", SampleProvenance.AUTHORED, expected, actual, 0.9, List.of(), "because",
                 "excerpt", 1000, null, null, error);
     }
 }

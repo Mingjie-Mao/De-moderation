@@ -68,9 +68,44 @@ public class EvaluationJsonWriter {
             node.put("perDecision", perDecision(result));
             node.put("pairs", pairs(result));
             node.put("confusion", confusion(result));
+            node.put("strata", strata(result));
         }
 
         return node;
+    }
+
+    /**
+     * The score split by each property a sample carries.
+     *
+     * <p>Here rather than only in the Markdown because this file is what gets
+     * read programmatically, and answering "is it worse in Chinese" by parsing a
+     * table out of a report — or by joining the per-sample CSV back onto the
+     * dataset — is how that question ends up not being asked.
+     *
+     * <p>Every slice carries its own count, so a reader can see that a figure
+     * rests on eleven samples without having to go and find out.
+     */
+    private Map<String, Object> strata(EvaluationResult result) {
+        Map<String, Object> node = new LinkedHashMap<>();
+        node.put("language", slices(result, SampleOutcome::language));
+        node.put("category", slices(result, SampleOutcome::category));
+        node.put("provenance", slices(result, outcome -> outcome.provenance().name()));
+        return node;
+    }
+
+    private List<Map<String, Object>> slices(
+            EvaluationResult result, java.util.function.Function<SampleOutcome, String> dimension) {
+
+        List<Map<String, Object>> rows = new ArrayList<>();
+        result.matricesBy(dimension).forEach((key, matrix) -> {
+            Map<String, Object> row = new LinkedHashMap<>();
+            row.put("value", key);
+            row.put("judged", matrix.total());
+            row.put("accuracy", matrix.accuracy());
+            row.put("macroF1", matrix.macroF1());
+            rows.add(row);
+        });
+        return rows;
     }
 
     private Map<String, Object> pairs(EvaluationResult result) {
