@@ -180,14 +180,6 @@
             <artifactId>junit-jupiter</artifactId>
             <scope>test</scope>
         </dependency>
-        <!-- MinIO speaks the S3 API, so the S3 storage backend is tested against
-             a real server rather than against a stub that agrees with whatever
-             the implementation happens to do. -->
-        <dependency>
-            <groupId>org.testcontainers</groupId>
-            <artifactId>minio</artifactId>
-            <scope>test</scope>
-        </dependency>
     </dependencies>
 
     <build>

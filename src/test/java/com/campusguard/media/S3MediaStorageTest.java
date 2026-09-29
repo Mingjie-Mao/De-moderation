@@ -9,7 +9,7 @@ import java.util.UUID;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.testcontainers.containers.MinIOContainer;
+import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.utility.DockerImageName;
 import software.amazon.awssdk.auth.credentials.AwsBasicCredentials;
 import software.amazon.awssdk.auth.credentials.StaticCredentialsProvider;
@@ -28,37 +28,56 @@ import software.amazon.awssdk.services.s3.S3Client;
  */
 class S3MediaStorageTest extends MediaStorageContract {
 
+    private static final String BUCKET = "campusguard-test";
+
     /**
-     * From quay.io, not Docker Hub. MinIO's {@code minio/minio} images are no
-     * longer published there — a pull answers "repository does not exist", which
-     * reads like a typo rather than like a move. Testcontainers checks the image
-     * name against the one its MinIO module expects, so the substitution has to
-     * be declared rather than assumed.
+     * S3Mock rather than MinIO, because MinIO is no longer pullable.
+     *
+     * <p>Its images went from Docker Hub first — a pull there answers "repository
+     * does not exist" — and the pin to quay.io that replaced them now answers
+     * {@code unauthorized: access to the requested resource is not authorized}.
+     * CI failed on that and failed identically on a rerun, at 412 seconds each
+     * time, while this machine kept passing on a copy cached weeks earlier: the
+     * exact shape of a dependency that has disappeared without anybody noticing.
+     *
+     * <p>Still a server rather than a stub, which is the whole point of this
+     * class. The assertions below are about what the S3 protocol does — a delete
+     * of a key that was never there succeeds, a head of a missing key raises
+     * NoSuchKey, listing is lexicographic — and a hand-written double would only
+     * confirm what somebody told it to say. S3Mock implements the HTTP API, so
+     * those answers still come from an implementation of the protocol rather than
+     * from this repository's idea of it.
+     *
+     * <p>And it is checked against the real thing: {@link RealBucketMediaStorageTest}
+     * runs this same contract against the bucket a deployment uses, so a place
+     * where S3Mock is wrong about S3 shows up as those two disagreeing.
      */
-    private static final MinIOContainer MINIO = new MinIOContainer(
-            DockerImageName.parse("quay.io/minio/minio:RELEASE.2024-08-29T01-40-52Z")
-                    .asCompatibleSubstituteFor("minio/minio"));
+    private static final GenericContainer<?> S3MOCK = new GenericContainer<>(
+                    DockerImageName.parse("adobe/s3mock:4.7.0"))
+            .withExposedPorts(9090)
+            .withEnv("initialBuckets", BUCKET);
 
     private static S3Client client;
 
-    private static final String BUCKET = "campusguard-test";
     private static final String PREFIX = "media/";
 
     private String namespace;
     private MediaStorage storage;
 
     @BeforeAll
-    static void startMinio() {
-        MINIO.start();
+    static void startServer() {
+        S3MOCK.start();
         client = S3Client.builder()
                 .httpClient(UrlConnectionHttpClient.create())
-                .endpointOverride(URI.create(MINIO.getS3URL()))
+                .endpointOverride(URI.create(
+                        "http://" + S3MOCK.getHost() + ":" + S3MOCK.getMappedPort(9090)))
                 .region(Region.of("us-east-1"))
+                // S3Mock accepts any credentials; these exist because the SDK
+                // refuses to sign a request without them.
                 .credentialsProvider(StaticCredentialsProvider.create(
-                        AwsBasicCredentials.create(MINIO.getUserName(), MINIO.getPassword())))
+                        AwsBasicCredentials.create("test", "test")))
                 .forcePathStyle(true)
                 .build();
-        client.createBucket(request -> request.bucket(BUCKET));
     }
 
     /**

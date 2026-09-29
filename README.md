@@ -300,7 +300,7 @@ Run the full suite:
 mvn verify
 ```
 
-The suite runs its integration tests against real PostgreSQL **and real MinIO**
+The suite runs its integration tests against real PostgreSQL **and a real S3 server**
 through Testcontainers, so Docker is a prerequisite. It covers concurrent
 aggregation, session rotation, media, assignment, appeals, queue recovery, model
 degradation, the investigation loop against a scripted model, the orphan sweep,
@@ -308,8 +308,8 @@ and one storage contract that both media backends have to satisfy identically.
 
 Two suites are skipped unless `GEMINI_API_KEY` is set, and one unless
 `MEDIA_S3_BUCKET` is: they call a real model and a real bucket. The bucket one
-runs the same storage contract MinIO satisfies, under a prefix of its own that
-it deletes afterwards — what MinIO cannot check is whether the provider a
+runs the same storage contract the local S3 server satisfies, under a prefix of
+its own that it deletes afterwards — what a local server cannot check is whether the provider a
 deployment is actually pointed at agrees about region naming and path-style
 addressing.
 

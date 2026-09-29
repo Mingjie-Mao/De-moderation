@@ -283,11 +283,20 @@ Integration tests use Testcontainers with real PostgreSQL 16 rather than H2. The
 | Evaluation harness | Pair scoring, multi-run spread, instability, and the held-out set's own invariants |
 | Database and API policy | Flyway V1–V9, Actuator, Swagger and N+1 query counts |
 
-The S3 backend is tested against MinIO through Testcontainers rather than against
-a stub. The three places it could be wrong while passing a hand-written double
-are all protocol behaviours: a delete of a missing key succeeds, a head of one
-raises `NoSuchKey`, and listing is lexicographic. A double would simply agree
-with whatever the implementation did.
+The S3 backend is tested against a real S3 server through Testcontainers rather
+than against a stub. The three places it could be wrong while passing a
+hand-written double are all protocol behaviours: a delete of a missing key
+succeeds, a head of one raises `NoSuchKey`, and listing is lexicographic. A
+double would simply agree with whatever the implementation did.
+
+That server was MinIO until its images stopped being pullable — Docker Hub
+first, then the quay.io pin that replaced them, which began answering
+`unauthorized`. CI failed on it twice at 412 seconds each while this repository's
+own machines kept passing on copies cached weeks earlier, which is what a vanished
+dependency looks like from the inside. It is `adobe/s3mock` now, and the swap is
+checked rather than assumed: `RealBucketMediaStorageTest` runs the same contract
+against the deployment's own bucket, so anywhere the local server is wrong about
+S3 shows up as the two disagreeing.
 
 The held-out dataset is itself under test. It is the one artefact nothing else
 touches — hand-edited, the denominator of every published number, and silently
@@ -299,7 +308,7 @@ Verified locally on 13 September 2026:
 
 - Maven tests: 358 run, 0 failures, 0 errors, 2 skipped (the two suites that require a live model key)
 - PostgreSQL: 16 through Testcontainers
-- MinIO: `RELEASE.2024-08-29` through Testcontainers
+- S3Mock: `adobe/s3mock:4.7.0` through Testcontainers (replaced MinIO, whose images stopped being pullable)
 - Flyway: V1–V9 validated and applied
 - Admin web: lint, type check and production build passed
 - Backend: Docker image build passed
