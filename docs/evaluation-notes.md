@@ -237,6 +237,44 @@ table says, and which is the argument for the harness producing this split
 itself rather than leaving it to be worked out by hand afterwards, as this table
 was.
 
+## What the category split said, on 30 September
+
+One run each of `v2` and `v3` over the same 72 samples, 144 model calls, with the
+harness producing the breakdown rather than a person. Both engines classified
+identically — macro-F1 0.986 and accuracy 0.986 for each, which is the third time
+`v3` has been measured as behaviourally identical to `v2` on this set.
+
+| category | n | `v2` and `v3` accuracy |
+|---|---|---|
+| ABUSE | 8 | 1.000 |
+| BORDERLINE | 20 | 1.000 |
+| ILLEGAL | 8 | 1.000 |
+| SPAM | 8 | 1.000 |
+| **NORMAL** | 28 | **0.964** |
+
+**The only mistake either engine makes on this set is a false positive.** Every
+violating category is perfect, including the twenty BORDERLINE samples that exist
+because they are the hard ones; the single error is one ordinary post judged as
+something to act on. That is the opposite of what the split was expected to show,
+and it is the more comfortable of the two failures to have — a reviewer sees a
+case that should not have been opened, rather than a violation nobody was shown.
+
+Language, the same run, now produced rather than derived: `zh` 1.000 over 28, `en`
+0.977 over 44. It agrees with the hand-worked table above, which is the check that
+the automated split is computing what the manual one did.
+
+Macro-F1 is deliberately absent from that table. In this dataset the editorial
+category *determines* the expected action — ABUSE, ILLEGAL and SPAM are REMOVE
+100% of the time, BORDERLINE is ESCALATE, NORMAL is ALLOW — so every category
+slice holds exactly one expected label, and a macro average over the classes
+present in it is arithmetic about the label mix rather than a measurement of the
+engine. The first run of this breakdown printed 0.491 for NORMAL beside an
+accuracy of 0.964, which is what that arithmetic looks like when it is allowed
+through: one wrong answer in a slice expecting ALLOW 28 times introduces a second
+class scoring zero and halves the mean. The report now withholds macro-F1 from
+any slice where one expected answer covers 80% of it, which is the same guard
+`renderBySource` already applied to the provenance split.
+
 `gemini-3.5-flash-lite/v3` had no row here. A three-run benchmark costs 219 model
 calls per engine and the free tier allows 500 a day, so the run reached its
 fourth engine with the daily quota gone and the circuit breaker refusing calls it

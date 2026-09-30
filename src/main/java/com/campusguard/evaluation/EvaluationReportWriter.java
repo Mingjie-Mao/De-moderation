@@ -413,10 +413,13 @@ public class EvaluationReportWriter {
         boolean anySmall = false;
         for (Map.Entry<String, ConfusionMatrix> slice : slices.entrySet()) {
             ConfusionMatrix matrix = slice.getValue();
-            // Below this a macro-F1 is an average over classes with one or two
-            // members each, which moves by a tenth when a single sample changes
-            // and reads as a difference between engines when it is not one.
-            boolean enoughForF1 = matrix.total() >= MIN_SAMPLES_FOR_F1;
+            // Two ways a slice's macro-F1 misleads, and both have been seen. Too
+            // few samples: an average over classes with one or two members each
+            // moves by a tenth when one sample changes. Dominated by one label:
+            // the NORMAL slice expects ALLOW 27 times out of 28, so a single
+            // wrong answer introduces a class scoring zero and halves the mean
+            // while accuracy stays at 0.964.
+            boolean enoughForF1 = matrix.total() >= MIN_SAMPLES_FOR_F1 && !dominatedBySingleLabel(matrix);
             anySmall |= !enoughForF1;
 
             out.append("| ").append(slice.getKey())
@@ -428,10 +431,13 @@ public class EvaluationReportWriter {
         out.append("\n");
 
         if (anySmall) {
-            out.append("Macro-F1 is left out where a slice holds fewer than ")
+            out.append("Macro-F1 is left out of a slice holding fewer than ")
                     .append(MIN_SAMPLES_FOR_F1)
-                    .append(" samples: averaged over three classes that few, it moves by a tenth\n")
-                    .append("when one sample changes.\n\n");
+                    .append(" samples, or one where a single\n")
+                    .append("expected answer covers 80% of them. In the first an average over three classes\n")
+                    .append("moves by a tenth when one sample changes; in the second one wrong answer adds a\n")
+                    .append("class scoring zero and halves the mean while accuracy barely moves. Read the\n")
+                    .append("accuracy column for those rows.\n\n");
         }
     }
 
@@ -482,22 +488,28 @@ public class EvaluationReportWriter {
      * it separately says more about the label mix than about the engine.
      */
     private boolean dominatedBySingleLabel(EvaluationResult result, SampleProvenance provenance) {
-        List<SampleOutcome> subset = result.outcomes().stream()
-                .filter(outcome -> outcome.provenance() == provenance)
-                .toList();
+        return dominatedBySingleLabel(result.matrixFor(provenance));
+    }
 
-        if (subset.isEmpty()) {
+    /**
+     * Whether one slice is so dominated by a single expected answer that its
+     * macro-F1 says more about the label mix than about the engine.
+     *
+     * <p>The case that made this necessary in {@link #renderStratified} as well:
+     * the NORMAL slice of the held-out set is 28 samples of which 27 expect
+     * ALLOW, and one wrong answer there introduced a second class with an F1 of
+     * zero. Macro-F1 came out 0.491 beside an accuracy of 0.964 — a number that
+     * reads as a broken engine and means one mistake.
+     */
+    private boolean dominatedBySingleLabel(ConfusionMatrix matrix) {
+        if (matrix.total() == 0) {
             return false;
         }
-
-        long largest = subset.stream()
-                .collect(java.util.stream.Collectors.groupingBy(SampleOutcome::expected, java.util.stream.Collectors.counting()))
-                .values().stream()
-                .mapToLong(Long::longValue)
+        long largest = matrix.allMetrics().stream()
+                .mapToLong(ConfusionMatrix.ClassMetrics::support)
                 .max()
                 .orElse(0);
-
-        return (double) largest / subset.size() >= 0.80;
+        return (double) largest / matrix.total() >= 0.80;
     }
 
     private void renderMatrix(StringBuilder out, EvaluationResult result) {
