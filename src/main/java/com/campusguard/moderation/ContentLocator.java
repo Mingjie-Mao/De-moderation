@@ -58,6 +58,15 @@ public class ContentLocator {
         };
     }
 
+    /** Freeze the reported version while excluding a concurrent edit or deletion. */
+    @Transactional(propagation = Propagation.MANDATORY, readOnly = true)
+    public Optional<ModeratedContent> captureForReport(TargetType targetType, UUID targetId) {
+        return switch (targetType) {
+            case POST -> postRepository.findForEvidence(targetId).map(ContentLocator::from);
+            case COMMENT -> commentRepository.findForEvidence(targetId).map(ContentLocator::from);
+        };
+    }
+
     /**
      * The author of the target whether or not it is still visible.
      *

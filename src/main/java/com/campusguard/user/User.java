@@ -35,6 +35,15 @@ public class User {
     @Column(columnDefinition = "text")
     private String bio;
 
+    @Column(name = "avatar_media_id")
+    private UUID avatarMediaId;
+    @Column(name = "avatar_color", nullable = false)
+    private int avatarColor;
+    @Column(name = "language_tag", nullable = false, length = 10)
+    private String languageTag = "en";
+    @Column(nullable = false, length = 10)
+    private String theme = "light";
+
     @Column(name = "token_version", nullable = false)
     private int tokenVersion;
 
@@ -68,12 +77,7 @@ public class User {
         this.tokenVersion = 0;
     }
 
-    /**
-     * Takes effect for new logins immediately, and for an already-issued token
-     * only when that token expires. Nothing here revokes outstanding tokens; the
-     * short token lifetime is what bounds the gap, and closing it properly would
-     * need either a revocation list or a per-user token version.
-     */
+    /** AccountStateFilter checks this status on every authenticated request. */
     public void ban() {
         this.status = UserStatus.BANNED;
     }
@@ -103,6 +107,18 @@ public class User {
         this.displayName = displayName == null || displayName.isBlank() ? username : displayName.strip();
         this.bio = bio == null || bio.isBlank() ? null : bio.strip();
     }
+
+    public void updatePreferences(UUID media, boolean changeAvatar, Integer color, String language, String theme) {
+        if (changeAvatar) this.avatarMediaId = media;
+        if (color != null) this.avatarColor = color;
+        if (language != null) this.languageTag = language;
+        if (theme != null) this.theme = theme;
+    }
+    public UUID getAvatarMediaId() { return avatarMediaId; }
+    public String getAvatarUrl() { return avatarMediaId == null ? null : com.campusguard.media.MediaUrls.publicUrl(avatarMediaId); }
+    public int getAvatarColor() { return avatarColor; }
+    public String getLanguageTag() { return languageTag; }
+    public String getTheme() { return theme; }
 
     public UUID getId() {
         return id;

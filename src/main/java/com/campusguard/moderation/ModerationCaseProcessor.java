@@ -7,6 +7,8 @@ import com.campusguard.moderation.engine.ModerationEngine;
 import com.campusguard.moderation.engine.ModerationRequest;
 import com.campusguard.moderation.engine.ModerationVerdict;
 import com.campusguard.media.MediaService;
+import com.campusguard.media.MediaStorageException;
+import com.campusguard.common.NotFoundException;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.HashMap;
@@ -106,7 +108,8 @@ public class ModerationCaseProcessor {
         }
 
         Optional<ContentLocator.ModeratedContent> content =
-                contentLocator.find(moderationCase.getTargetType(), moderationCase.getTargetId());
+                moderationCase.reportedContent().or(() ->
+                        contentLocator.find(moderationCase.getTargetType(), moderationCase.getTargetId()));
 
         if (content.isEmpty()) {
             // The author removed it between the report and now. Still a decision
@@ -120,7 +123,19 @@ public class ModerationCaseProcessor {
         }
 
         ModerationEngine primary = engines.primary();
-        ModerationRequest request = toRequest(content.get()).forCase(caseId);
+        ModerationRequest request;
+        try {
+            request = toRequest(content.get()).forCase(caseId);
+        } catch (NotFoundException | MediaStorageException ex) {
+            // A missing or unreadable attachment must not make this case cycle
+            // through ANALYSING forever. The reviewer needs to see the report
+            // and the explicit evidence gap.
+            log.warn("Media for case {} could not be read.", caseId, ex);
+            moderationCase.recordVerdict("none", ModerationVerdict.escalate(
+                    "The reported attachment is unavailable. Review the remaining evidence manually."));
+            recordOutcome(moderationCase, Map.of("reason", "media-unavailable"));
+            return;
+        }
 
         long startedAt = System.nanoTime();
         ModerationVerdict verdict;
@@ -252,7 +267,7 @@ public class ModerationCaseProcessor {
         ModerationRequest request = ModerationRequest.of(
                 content.targetType(), content.targetId(), content.title(), content.body(), content.authorId());
         if (content.mediaId() == null) return request;
-        MediaService.StoredMedia stored = mediaService.read(content.mediaId());
+        MediaService.StoredMedia stored = mediaService.readEvidence(content.mediaId());
         return request.withMedia(new ModerationRequest.MediaInput(
                 stored.metadata().getContentType(), stored.bytes(), stored.metadata().getSha256()));
     }

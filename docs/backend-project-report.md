@@ -3,14 +3,19 @@
 
 # De-Moderation Backend Project Report
 
-> Updated: 13 September 2026
-> Repository: `De-moderation-backend`
-> Branch: `main`
-> Scope: backend, database, AI moderation, admin web, testing, deployment and operations
+> Updated: 3 October 2026
+> Repository: `De-moderation`
+> Branch: `codex/moderation-hardening` (uncommitted changes)
+> Scope: backend, database, AI moderation, admin web, core testing and interview demonstration
+
+## Northflank acceptance (2026-10-05)
+
+The current demo uses the original Neon database and R2 bucket. Real member and administrator logins, 11 ANU posts, Gemini advice, human review and audit were verified through the new API. The Pages site was redeployed, and both accounts loaded the 11 live posts in an Android emulator smoke test. Full migration evidence and warm latency limitations are in [the deployment notes](../deploy/northflank/README.md).
+
 
 ## 1. Project Overview
 
-De-Moderation is the backend and content moderation system for the `De-discussion` campus forum. Members use the Android client to register, publish posts and comments, upload images, report content and submit appeals. Administrators use a separate web console to review cases, revise decisions and resolve appeals.
+De-Moderation is the backend and content moderation system for the `De-discussion` campus forum. The Android client uses real server member accounts and provides registration, login, posts, comments, images, reports and appeals. Member demo credentials are `1234` / `1234`. Admin mode requires a real server administrator login; administrators can review cases, model advice and audit trails, revise decisions and resolve appeals in the app or the web console.
 
 The central principle is simple: **AI performs the initial classification; a person makes the final decision.**
 
@@ -22,23 +27,15 @@ This design addresses three practical requirements:
 
 A reviewer can also ask an optional, read-only assistant to gather the author's record and the precedent for a case before deciding (§6.3). It recommends and never decides, is off by default, and has not yet been deployed to the public demo.
 
-The complete demonstration path is working. The Cloudflare Pages admin console calls the Render backend, the backend stores data in Neon PostgreSQL and uses Gemini when available. Accounts, posts, comments, reports, moderation cases, appeals, notifications and administrator actions are persisted in the database; they are not mock frontend data.
+The complete demonstration path is working. The Cloudflare Pages admin console calls the Northflank backend, the backend stores data in Neon PostgreSQL and uses Gemini when available. Accounts, posts, comments, reports, moderation cases, appeals, notifications and administrator actions are persisted in the database; they are not mock frontend data.
 
 Public endpoints:
 
 - Admin console: `https://de-moderation-review-demo.pages.dev`
-- Backup admin console: `https://de-moderation-review-demo.x2337445.chatgpt.site`
-- Backend API: `https://de-moderation-api-demo.onrender.com`
-- Readiness check: `https://de-moderation-api-demo.onrender.com/actuator/health/readiness`
+- Backend API: `https://p01--de-moderation-api--z48dx52bgz5k.code.run`
+- Readiness check: `https://p01--de-moderation-api--z48dx52bgz5k.code.run/actuator/health/readiness`
 
-This environment is suitable for interviews and API integration, but it is not yet a permanently operated production environment. The repository now contains what was missing — an S3-compatible media backend, Alertmanager delivery, an optional off-site backup copy, a restore drill and a mixed-workload load test — but the demo runs none of it yet. It still needs a bucket, SMTP credentials and an alert inbox, along with an always-on instance and cluster-specific Kubernetes values.
-
-Three of those were exercised on 13 September 2026, which is a weaker claim than "deployed" and a stronger one than "written":
-
-- **Restore drill: run, passed.** `scripts/restore-drill.sh` restored a real dump into a throwaway container — checksum, Flyway V9, seven core tables, 59 constraints and the case/report referential check all passed. The dump was a development database, not production, so what this establishes is that the drill works and that a dump of this schema restores cleanly.
-- **`MEDIA_BACKEND=S3`: rehearsed end to end, not deployed.** The built jar was started against a local MinIO with the deployment's own environment variable names. An image uploaded through `POST /api/media` landed in the bucket under the configured prefix, and after a restart of the process the same request returned byte-identical content. The same jar on `FILESYSTEM` over a directory that was then deleted — a container rebuild — returned 404 for an image whose database row was still present, which is the failure this seam exists to end. What is still missing is only a real bucket and its credentials.
-- **Alert delivery: rendering verified, delivery not.** `scripts/render-alertmanager.sh` refuses cleanly when the six variables are unset, and with values supplied it renders a config that Alertmanager's own `amtool` accepts, at mode 600. No alert has been delivered to anyone, because there is no SMTP account. Rehearsing this found and fixed a real defect: values were escaped for `sed` but not for the YAML string they land in, so an SMTP password containing a backslash or a quote was rejected with a YAML error that named neither.
-
+This project is maintained as a resume/interview demo. Real Gemini calls, S3 media persistence, V13 migrations, bounded comment paging and admin sessions have been verified. Independent cloud monitoring, Resend delivery, scheduled backup/bucket replication, Kubernetes and alerting deployment assets have been removed to reduce maintenance. Basic health checks, logs, CI and manual backup/restore remain. See the [demo deployment guide](production-runbook.md) for the current setup.
 
 ## 2. System Architecture
 
@@ -49,9 +46,9 @@ Three of those were exercised on 13 September 2026, which is a weaker claim than
 | AI moderation | Gemini, Spring AI, Resilience4j | Semantic recommendations, retry, circuit breaking and fallback |
 | Rule engine | `keyword-v1` | Deterministic baseline and dependency-free fallback |
 | Admin web | React 19, Next 16 API, vinext | Human review, corrected decisions and appeal handling |
-| Client | Android, separate `De-discussion` repository | Member-facing forum interactions |
-| Monitoring | Actuator, Micrometer, Prometheus, Grafana | Health, system metrics and moderation metrics |
-| Deployment | Docker, Caddy, Render, Cloudflare Pages | Packaging, HTTPS and the public demonstration |
+| Client | Android, separate `De-discussion` repository | Forum interactions and authenticated administrator review |
+| Health | Actuator, Micrometer | Basic health and application metrics |
+| Deployment | Docker, Caddy, Northflank, Cloudflare Pages | Packaging, HTTPS and the public demonstration |
 
 ```mermaid
 flowchart LR
@@ -65,8 +62,6 @@ flowchart LR
     Worker --> Keyword[keyword-v1 fallback]
     Worker --> Review[Human review]
     Review --> Audit[(Audit and appeals)]
-    Prometheus --> API
-    Grafana --> Prometheus
 ```
 
 The backend stores business data and the moderation queue in the same PostgreSQL database. Workers claim records from the database rather than relying on an in-memory queue, so cases remain available after a restart. Automated analysis only produces a recommendation; hiding or deleting content, or banning an account, requires administrator confirmation.
@@ -78,6 +73,8 @@ The backend stores business data and the moderation queue in the same PostgreSQL
 Public registration can only create a `MEMBER`; a client cannot obtain administrator rights through a request field. A successful login returns a JWT access token valid for one hour and a refresh token valid for 30 days. Refresh tokens rotate after every use, and only their SHA-256 digests are stored, so an old token cannot be replayed.
 
 The system supports password changes, sign-out from all devices and one-time password resets. Changing a password or signing out everywhere increments `tokenVersion`, immediately invalidating existing access tokens. Passwords are stored with BCrypt. Startup configuration creates an administrator only when the username does not exist; it never promotes an existing member with the same name.
+
+The reset API and one-time tokens are implemented, but demo mail delivery is disabled, so email-based recovery is not available.
 
 ### 3.2 Forum
 
@@ -95,7 +92,7 @@ In-app notifications cover moderation outcomes, appeal status and pending admini
 
 The media endpoint accepts JPEG and PNG only, with default limits of 8 MiB and 20 million pixels. The service identifies the actual format, reads dimensions, fully decodes the image and re-encodes it. This blocks disguised files and decompression bombs while removing original metadata.
 
-An uploader can attach an image only to their own post or comment. Public downloads are limited to images referenced by content that is still visible; an unpublished image or an image attached to hidden content cannot be fetched simply by guessing its UUID. Where the bytes live is a deployment setting behind one storage interface: a directory, or any S3-compatible bucket — AWS S3, Cloudflare R2, or GCS in interoperability mode. The public demo still writes to Render's local directory, which does not survive a rebuild, so it needs `MEDIA_BACKEND=S3`. An optional hourly sweep deletes media that no post or comment refers to once it is a day old, and never touches media attached to hidden or removed content, because those decisions can be reversed.
+An uploader can attach an image only to their own post or comment. Public downloads are limited to images referenced by content that is still visible; an unpublished image or an image attached to hidden content cannot be fetched simply by guessing its UUID. Where the bytes live is a deployment setting behind one storage interface: a directory, or any S3-compatible bucket — AWS S3, Cloudflare R2, or GCS in interoperability mode. The public demo now uses `MEDIA_BACKEND=S3` with a private Cloudflare R2 bucket, so uploaded media does not depend on Render's temporary filesystem. An optional hourly sweep deletes media that no post or comment refers to once it is a day old, and never touches media attached to hidden or removed content, because those decisions can be reversed.
 
 ## 4. Moderation Workflow
 
@@ -185,12 +182,12 @@ When a reviewer asks, the service first fetches the author's decisions from the 
 
 | Guarantee | How it is enforced |
 |---|---|
-| It cannot change anything | Every lookup runs in a read-only transaction; `AdminModerationService.decide` remains the only path that hides content or bans an account |
+| Lookup tools cannot change content or decisions | Every lookup runs in a read-only transaction; `AdminModerationService.decide` remains the only path that hides content or bans an account |
 | It cannot be pointed at another case | The loop passes the case under investigation to each tool; the model's arguments never name it |
-| It cannot run up a bill | At most 60 investigations per reviewer per hour; a stored brief is returned free, and a refused request is not charged |
+| Its call budget is bounded | At most 60 investigations per reviewer per hour; a stored brief is returned free, and a refused request is not charged |
 | It can be audited | The brief is written to the audit log against the administrator who asked, and each model call is recorded in `ai_invocations` as `investigator/<prompt version>` |
 
-Measured on 16 scenarios, each run three times against `gemini-3.5-flash-lite` with prompt `inv-v4`: a moderator could defend the recommendation in 0.875 of them, the answer was identical across runs in 0.938, and the brief cited what the case turns on in 0.813 — at about 2,100 prompt tokens and one lookup per investigation, roughly 3.6 times the tokens of a verdict. Two failures reproduce and are documented rather than patched: it will not be the first to recommend a ban, and it anchors on precedent even when the dismissal rate argues the other way. The design, prompt history and measurements are in [investigation.md](investigation.md).
+Historical results on 16 scenarios, each run three times against `gemini-3.5-flash-lite` with prompt `inv-v4`: a moderator could defend the recommendation in 0.875 of them, the answer was identical across runs in 0.938, and the brief cited what the case turns on in 0.813 — at about 2,100 prompt tokens and one lookup per investigation, roughly 3.6 times the tokens of a verdict. Two failures reproduce and are documented rather than patched: it will not be the first to recommend a ban, and it anchors on precedent even when the dismissal rate argues the other way. The design, prompt history and measurements are in [investigation.md](investigation.md).
 
 ## 7. Evaluation
 
@@ -245,7 +242,7 @@ v1's ESCALATE failure reproduced on data written five weeks later (0.056 → 0.0
 
 The JWT key has no default and must be at least 32 bytes; the application refuses to start when it is missing. Authentication reloads the user on every request, so a ban, administrator demotion or “sign out all devices” takes effect without waiting for the JWT to expire.
 
-The production profile disables Swagger. Prometheus should only be available on an internal observability network. A summary health endpoint is public, while component details require administrator access. The admin console keeps tokens in `sessionStorage`, so they disappear when the browser session closes.
+The production profile disables Swagger. The current demo disables Prometheus exposure by default. A summary health endpoint is public, while component details require administrator access. The admin console keeps tokens in `sessionStorage`, so they disappear when the browser session closes.
 
 ## 9. Admin Review and Appeals
 
@@ -277,17 +274,16 @@ Integration tests use Testcontainers with real PostgreSQL 16 rather than H2. The
 | AI failure handling | Timeout, HTTP 429, circuit breaking, invalid output, correction retry and fallback |
 | Appeals and notifications | Appeal permissions, reversal, state restoration and notifications |
 | Media | Format, pixel count, re-encoding, ownership and access control |
-| Media storage | One shared contract both backends must satisfy, run against a directory, against a real S3 server, and — when the S3 block of `.env` is filled in — against the deployment's own bucket |
+| Media storage | One shared contract both backends must satisfy, run against a directory, against S3Mock, and — when the S3 block of `.env` is filled in — against the deployment's own bucket |
 | Media sweep | What the orphan sweep deletes, and — the assertions that matter — what it refuses to delete |
 | Case investigation | Tool whitelist, read-only transactions, the step budget, citation checking, the shared circuit, endpoint access and limits, and the tool-calling adapter itself |
 | Evaluation harness | Pair scoring, multi-run spread, instability, and the held-out set's own invariants |
-| Database and API policy | Flyway V1–V9, Actuator, Swagger and N+1 query counts |
+| Database and API policy | Flyway V1–V13, Actuator, Swagger and N+1 query counts |
 
-The S3 backend is tested against a real S3 server through Testcontainers rather
-than against a stub. The three places it could be wrong while passing a
-hand-written double are all protocol behaviours: a delete of a missing key
-succeeds, a head of one raises `NoSuchKey`, and listing is lexicographic. A
-double would simply agree with whatever the implementation did.
+The S3 backend is tested against S3Mock through Testcontainers. This checks
+uploads, reads, deletes and listing against a separate S3 API implementation,
+but cannot prove the deployed provider's region and path-style behaviour.
+The optional real-bucket contract below covers that gap.
 
 That server was MinIO until its images stopped being pullable — Docker Hub
 first, then the quay.io pin that replaced them, which began answering
@@ -304,18 +300,15 @@ wrong if a pair's halves carry the same label or a sample was copied out of the
 set the prompts were tuned on. `HeldOutDatasetTest` asserts those properties
 rather than trusting them.
 
-Verified locally on 13 September 2026:
+Verified after simplification on 3 October 2026:
 
-- Maven tests: 358 run, 0 failures, 0 errors, 2 skipped (the two suites that require a live model key)
-- PostgreSQL: 16 through Testcontainers
-- S3Mock: `adobe/s3mock:4.7.0` through Testcontainers (replaced MinIO, whose images stopped being pullable)
-- Flyway: V1–V9 validated and applied
-- Admin web: lint, type check and production build passed
-- Backend: Docker image build passed
-- Review console: a stored brief rendered against a local backend, and each citation opened the cited case and led back
-- Restore drill: passed on a real dump, and failed as it should on a corrupted copy
-- Load: `k6-mixed.js` held every budget against a local build (§11)
-- GitHub Actions: last passed on `main` on 25 August 2026; this revision runs when it is pushed
+- Focused tests: 23 run, no failures, errors or skips, covering authentication, sessions, one-time tokens, comment bounds and production monitoring configuration.
+- Database: target demo migrated to V13; integration tests use PostgreSQL 16, while target Neon uses PostgreSQL 18.
+- Compose: configuration parses with four services only: PostgreSQL, backend, admin web and Caddy.
+- Live checks: readiness HTTP 200 / `UP`, admin HTTP 200, Gemini v2 active; anonymous Prometheus access rejected.
+- Evidence: private local `backups/project-simplification-20261003.validation.json`, containing no credentials.
+
+These 23 checks are not the full test count and do not mean live model calls, bucket contracts or load tests were rerun in this cleanup. CI configuration is retained; these changes are uncommitted and unpushed, so this revision has no new cloud CI result.
 
 ## 11. Deployment and Operations
 
@@ -325,7 +318,7 @@ The current public demonstration uses:
 Cloudflare Pages
         |
         v
-Render Spring Boot API
+Northflank Spring Boot API
         |
         v
 Neon PostgreSQL
@@ -336,31 +329,23 @@ Neon PostgreSQL
 | Layer | Current status |
 |---|---|
 | Admin web | Publicly available over HTTPS on Cloudflare Pages |
-| Backend | Render Docker service; readiness reports `UP` |
-| Database | Managed Neon PostgreSQL with V1–V8 applied; V9 arrives with the next deployment |
+| Backend | Northflank Free Docker instance; readiness reports `UP` |
+| Database | Managed Neon PostgreSQL, migrated to V13 |
 | AI | Gemini v2 active, with `keyword-v1` fallback |
 | Secrets | Local `.env` is ignored by Git; cloud values use platform environment variables |
 | CI | Backend verify and Docker build; admin lint and build |
 
-The repository also contains a single-host production Compose stack, Caddy HTTPS, Prometheus, Alertmanager, a Grafana datasource, alert rules, database and media backup/restore scripts, a restore drill, and Kubernetes templates.
-
-Three gaps in that list have since been closed, and it is worth being precise about what "closed" means for each.
-
-**Alert delivery.** The rules had been evaluated by Prometheus and delivered to nobody: there was no `alerting` block and no Alertmanager. Both now exist, with severity routing, an inhibition rule so one outage sends one email rather than three, and a render step — Alertmanager is the one component here that does not expand environment variables in its own config, so `scripts/render-alertmanager.sh` fills the template in, refuses to write anything when a variable is unset, and checks the result with `amtool`. What has been verified is that the rendered config is accepted by Alertmanager's own tool. What has not been verified is that a real SMTP account delivers to a real inbox, because no such account has been supplied.
-
-**Off-site backup.** `scripts/backup.sh` takes an optional `OFFSITE_BUCKET` and copies each dump, media archive and checksum to an S3-compatible bucket, then reads the dump back to prove it arrived — an upload that reports success and stores nothing is the failure that makes people believe they have backups. Unverified against a real bucket, for the same reason.
+The repository provides a four-service Compose demo, Caddy HTTPS, manual backup/restore scripts and CI.
 
 **Restore.** This one is verified. `scripts/restore-drill.sh` restores a dump into a throwaway PostgreSQL container and checks the checksum, the Flyway history, the core tables, the constraint count and one referential invariant. It has been run against a real dump of this project's database and passed, and run against a deliberately corrupted copy of that dump and failed with a non-zero exit — a check that can only pass is not a check. Re-run on 13 September 2026 with the same result: every check passed on the real dump, and the corrupted copy produced 14 failures and exit code 1.
 
-**Load.** `load/k6-mixed.js` runs six workloads at once — browsing, sign-in, writing, reporting, uploading and the admin case list — each with its own latency budget. Run on 13 September 2026 against a local build on a laptop, with the keyword engine, a throwaway database and the per-account limits raised: 6,368 requests over three minutes, no failed request, `campusguard_throttled` zero, and every budget held — p95 9 ms browsing, 22 ms writing, 68 ms for the case list, 84 ms reporting and 140 ms uploading, against budgets of 500, 800, 1200, 1000 and 2500.
+**Load.** The latest retained local `load/k6-mixed-summary.json` passes seven of eight thresholds: p95 browse 7 ms, write 18 ms, report 22 ms, upload 432 ms and admin list 71 ms; browse and admin request failure rates are zero. Sign-in fails at 92.3%, mainly because of the per-IP login limiter. The script counts 429s separately, but k6 still includes them in its built-in failure rate. This is not an all-green load result or an estimate of deployed capacity: it measures a local build without model calls. Load testing is optional for this interview demo.
 
 The run before it did not hold, and the reason is worth recording. Raising the three limits the script and the runbook named left `campusguard.auth-rate-limit.logins-per-account` at its default of 12 per fifteen minutes; a virtual user here is one account signing in for the whole run, so 24 of every 36 attempts came back 429, the sign-in failure rate was 64.9% and every latency budget was still green, because a 429 is fast. Both lists now name all five. `campusguard_throttled` is the number that separates those two runs, and it is why it is printed.
 
 That shows the script works and these paths hold under a mix. It does not show capacity: the database, the application and the load generator shared one machine, and no model was called.
 
-Real cluster parameters are still not supplied.
-
-Opening the API root returns 401 by design because the policy denies unspecified endpoints. The admin console is the browser-facing application; readiness is the service check. Render's free instance may sleep when idle, so the health endpoint should be opened before a demonstration.
+Opening the API root returns 401 by design because the policy denies unspecified endpoints. The admin console is the browser-facing application; readiness is the service check. The default backend now uses one running Northflank instance. Render remains a rollback option; network latency, idle database resume and deployment restarts can still delay requests. Check readiness before a demonstration.
 
 ## 12. Limitations and Future Work
 
@@ -368,29 +353,13 @@ Opening the API root returns 401 by design because the policy denies unspecified
 |---|---|---|
 | Evaluation | Neither dataset is real traffic. The held-out set removes the tuning leak but its labels were written from the same policy the prompt states, so it cannot be read as an estimate of live accuracy | Harvest decided cases into a corpus and score against what reviewers actually did |
 | Investigation | Will not be the first to escalate, and anchors on precedent even when the dismissal rate argues against it | Retrieval over decided cases, once there are enough of them |
-| Production infrastructure | Free instances sleep and domains are platform-owned. The Kubernetes manifest is no longer unverified — all ten resources are accepted by a real v1.37 API server — but no pod has ever run from it, and its image references and hostnames are placeholders | Use an always-on instance, owned domain, Secret Manager and cluster-specific values |
-| Alert delivery | Exercised end to end against a local SMTP capture server: a warning reached the operators address, a critical reached the on-call one, and a firing `CampusGuardBackendDown` inhibited the warning sharing its job. Never sent through a real provider, so SMTP authentication, TLS negotiation against one and external deliverability remain untested | Supply `ALERT_SMTP_*` and confirm one alert arrives in a real inbox |
-| Off-site backup | Never exercised. The media bucket is verified now, but `OFFSITE_*` is unset, so no copy has ever been written off-site | Supply `OFFSITE_*` and confirm one copy and its checksum |
-| Comment fan-out | Top-level comments are paginated; one root comment can still have a wide reply tree | Page replies within a thread |
 | Media atomicity | Bytes and row are written in two steps and cannot share a transaction | Already bounded: compensation covers the ordinary failure, the sweep covers a process that dies between them |
 | Load coverage | Seven of the mixed workload's eight thresholds pass against a local process: browse p95 7 ms, write 18 ms, report 22 ms, admin 71 ms, upload 432 ms, no failed requests on admin or browse. The eighth cannot pass as written — `sign-in` allows under 1% failures, while the application's own ceiling of 30 logins per IP per 15 minutes guarantees about 92% at the script's two requests a second | Decide whether a 429 counts as a failure for this workload, since it is the limiter working as designed, or pace the workload beneath the ceiling. Then run it against a deployed stack rather than a local process |
 | Investigation measurement | The set is 32 scenarios now, but no run against a real model has finished one: the day's quota was exhausted after two. Consensus mode (`INVESTIGATOR_RUNS=3`) is implemented, unit-tested and unmeasured for the same reason. The figures in §6.3 come from the sixteen-scenario set and are no longer reproducible — a different set, and a grounding count that was under-reporting | Run the 32-scenario set on a fresh quota (~98 calls), then consensus (~294), against a ceiling of 500 a day |
 | Evaluation variance | The 192-sample table is still a single run; the held-out set now has three runs of keyword-v1, v1, v2 and v3, but v1 and v3 were measured in different sessions | Re-run the 192-sample set three times; a single session covering all four engines needs more than one day of free-tier quota |
-| Demo configuration | The public demo still runs the August build: filesystem media, no alert receiver and no investigation assistant | Deploy this revision with `MEDIA_BACKEND=S3`, a rendered Alertmanager config and, if wanted, `INVESTIGATOR_ENABLED=true` |
+| Demo configuration | Network, idle database resume and deployment restarts can add latency | Northflank is the default; check readiness, retain Render for rollback |
 
-Closed since the previous revision: media durability (an S3-compatible backend
-behind a storage seam with an orphan sweep, and a storage contract that now runs
-against the deployment's own bucket as well as against MinIO), alert delivery
-(Alertmanager with severity routing, exercised end to end including one
-inhibition), restore confidence (a drill that has been run and that fails on a
-corrupt dump), the Kubernetes manifest (accepted by a real API server) and the
-deprecated GitHub Actions versions.
-
-Two items moved the other way, and are in the table above rather than here. The
-off-site copy was described as verified and is not: nothing has ever been written
-off-site. The load script was described as run locally, which it now has been —
-and one of its eight thresholds turns out to be unsatisfiable against this
-application's own rate limiter.
+The retained engineering work covers media durability, bounded comments, token sessions, core integration tests and real model validation.
 
 ---
 
@@ -410,7 +379,7 @@ application's own rate limiter.
 | Moderation cases | list, detail, decision, assignment | Administrators only |
 | Case investigation | `GET /api/admin/moderation-cases/{id}/investigation`, `POST /api/admin/moderation-cases/{id}/investigate` | Administrators only; the POST is limited per reviewer, answers 409 unless the case is awaiting review, and 503 while the assistant is off |
 | Moderation status | `/api/moderation/status` | Public; returns capability status only |
-| Operations | health, metrics, Prometheus | Summary health is public; details are limited to administrators or the internal network |
+| Operations | health, metrics | Summary health is public; details require administrator access; Prometheus exposure is disabled for the demo |
 
 Local development exposes `/swagger-ui.html` and `/v3/api-docs`; the production profile disables both.
 
@@ -427,14 +396,18 @@ Local development exposes `/swagger-ui.html` and `/v3/api-docs`; the production 
 | V7 | `comment.depth` | Limit nesting to prevent recursive stack overflow |
 | V8 | production capabilities | Profiles, sessions, reset, throttling, media, assignment, SLA, appeals and notifications |
 | V9 | investigation indexes | Partial indexes behind "this author's past decisions" and "precedent under this rule" |
+| V10 | content removal provenance | Restore only content hidden by the case, not content deleted independently by its author |
+| V11 | case evidence snapshot | Freeze reported text, author and media before later edits |
+| V12 | investigation lease | Reserve a case before paid calls and recover after lease expiry |
+| V13 | comment page index | Partial keyset index over visible roots and replies in a post |
 
 `reports.target_id` and `moderation_cases.target_id` may refer to either a post or a comment, so they cannot both use a conventional database foreign key. The service validates the target on write. `audit_log.actor_id` deliberately has no user foreign key, preserving the audit history after account deletion. Raw AI responses and audit payloads use JSONB to accommodate different action structures.
 
-## Appendix C — Production Configuration
+## Appendix C — Demo Configuration
 
 ### C.1 Runtime configuration
 
-Real secrets belong in a local `.env`, Render environment variables or a future Secret Manager, never in code or Git. The main values are the database URL and credentials, JWT secret, administrator bootstrap password, Grafana password, CORS origins and Gemini key, plus, where used, the media bucket, alert SMTP and off-site backup credentials. Password-reset mail (`MAIL_*`) and alert mail (`ALERT_*`) are configured separately, and neither is configured on the demo.
+Real secrets belong in a local `.env` or deployment environment variables, never in Git. Demo configuration includes database credentials, JWT, administrator bootstrap, CORS, Gemini and media storage. The original optional SMTP password-reset delivery stays disabled for the demo.
 
 The administrator is a real database record. Its username is `admin`, while its password comes from `ADMIN_PASSWORD`; neither the report nor the repository contains the real password. Initialisation runs only when the account does not exist, and changing the environment value does not replace an existing database password.
 
@@ -454,22 +427,18 @@ npm ci
 npm run dev
 ```
 
-The local addresses are `http://localhost:8080` and `http://localhost:3000`. `localhost` works only on the current computer and is not a public interview URL.
+For interviews use the [hosted reviewer console](https://de-moderation-review-demo.pages.dev/) and API `https://p01--de-moderation-api--z48dx52bgz5k.code.run`. Local backend development uses `http://localhost:8080`.
 
 ### C.3 Deployment assets
 
 - `Dockerfile`: non-root Java 21 backend image.
 - `admin-web/Dockerfile`: vinext standalone admin image.
-- `docker-compose.prod.yml`: PostgreSQL, backend, admin web, Caddy, Prometheus, Alertmanager and Grafana.
+- `docker-compose.prod.yml`: PostgreSQL, backend, admin web and Caddy.
 - `deploy/Caddyfile`: HTTPS reverse proxy for the main and API domains.
-- `deploy/observability`: Prometheus, Grafana datasource, alert rules and the Alertmanager template.
-- `scripts/backup.sh` / `restore.sh`: database, media, checksums, an optional verified off-site copy and explicit restore confirmation.
-- `scripts/restore-drill.sh`: restores the newest dump into a throwaway container and checks the result.
-- `scripts/render-alertmanager.sh`: fills in the Alertmanager template and validates it with `amtool`.
+- `scripts/backup.sh` / `restore.sh`: manual database/filesystem-media backups, checksums and explicit restore confirmation.
+- `scripts/restore-drill.sh`: restores a selected dump into a throwaway container and checks the result.
 - `load/k6-mixed.js`: six workloads with a latency budget each; `load/k6-smoke.js` remains for a quick read-only check.
-- `deploy/k8s`: Deployment, Service, Ingress, TLS, HPA, PDB, NetworkPolicy and PVC templates.
 
-The Kubernetes templates cannot be applied safely to an unknown cluster. Actual deployment requires an image registry, immutable tags, an Ingress Controller, cert-manager, Secret Manager, managed PostgreSQL, the monitoring namespace and an available storage class.
 
 ## Appendix D — Development Issues
 
@@ -492,7 +461,6 @@ The Kubernetes templates cannot be applied safely to an unknown cluster. Actual 
 | Hikari durations written as `5s` | Production profile fails to start | Use integer milliseconds `5000/3000` |
 | Docker preloaded all Maven dependencies | Slow builds and oversized cache | Package directly with a BuildKit cache |
 | Admin image too large or missing dependencies | 1.71 GB image or non-running build | Standalone output with minimal runtime dependencies |
-| Prometheus had no receiver | Rules fired but reached nobody | Alertmanager with severity routing, rendered from a template and checked with `amtool` |
 | Render application and admin ports differed | Health checks could not connect | Use platform port 10000 consistently |
 | Render free-instance cold start | A healthy deployment looked unavailable | Wait for readiness and wake it before a demonstration |
 | API root returned 401 | Mistaken for a broken website | Distinguish the admin site, API and readiness; retain deny-by-default |
@@ -503,7 +471,6 @@ The Kubernetes templates cannot be applied safely to an unknown cluster. Actual 
 | Gemini 3 function calls replayed without thought signatures | The provider rejected the second turn of an investigation with 400 | Narrate earlier turns as text; tool declarations still accompany every request |
 | Investigation limit charged before the case check | A reviewer clicking on resolved cases spent the hourly allowance on 409s | Check the case first, so only a request that can reach a model is counted |
 | Missing usage recorded as zero tokens | A response without usage would be averaged in as a free call | Treat Spring AI's `EmptyUsage` as unknown in both model adapters |
-| Alertmanager config mounted with short syntax | A config nobody rendered became an empty directory and a restarting container | Long-syntax bind with `create_host_path: false`, so the deploy stops instead |
 
 ## Appendix E — Commit and Development History
 
@@ -526,4 +493,4 @@ Before the production work was merged, `main` contained 23 sequential feature co
 
 `render-demo` began as a single deployment snapshot with no common ancestor. A direct forced merge produced many `add/add` conflicts. The final approach committed the complete production implementation first, then connected the snapshot history with a content-preserving merge commit. This kept the README, evaluation data and branch history intact.
 
-The September work was developed on `feat/investigation-agent`: first the case-investigation assistant — author and rule history queries, a read-only tool registry, the bounded loop, prompt versions `inv-v1` to `inv-v5`, the review-console panel, the decision-corpus export and the investigation scenario set — and then the held-out evaluation set with multi-run spread, the S3-compatible media backend and orphan sweep, Alertmanager delivery, the off-site backup copy, the restore drill and the mixed k6 workload.
+The September work covered the investigation assistant, read-only tools, bounded loops, prompt versions, decision-corpus export, held-out evaluation, S3 media persistence and mixed workloads.

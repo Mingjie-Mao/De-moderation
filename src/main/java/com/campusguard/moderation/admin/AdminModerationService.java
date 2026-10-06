@@ -66,10 +66,14 @@ public class AdminModerationService {
         // Removed content included on purpose: this view exists so a person can
         // read what a decision was about, and a hidden item is exactly the case
         // where they most need to.
-        ReportedContentView content = contentLocator
-                .findIncludingRemoved(moderationCase.getTargetType(), moderationCase.getTargetId())
-                .map(ReportedContentView::of)
-                .orElse(null);
+        Optional<ContentLocator.ModeratedContent> current = contentLocator
+                .findIncludingRemoved(moderationCase.getTargetType(), moderationCase.getTargetId());
+        Optional<ContentLocator.ModeratedContent> reported = moderationCase.reportedContent();
+        ContentLocator.ModeratedContent evidence = reported.or(() -> current).orElse(null);
+        boolean changed = reported.isPresent() && !reported.equals(current);
+        ReportedContentView content = evidence == null ? null : ReportedContentView.of(caseId, evidence);
+        ReportedContentView currentView = changed
+                ? current.map(item -> ReportedContentView.of(caseId, item)).orElse(null) : null;
 
         List<CaseAuditEntryView> trail = auditEntryRepository
                 .findByTargetTypeAndTargetIdOrderByCreatedAtAsc(
@@ -78,7 +82,7 @@ public class AdminModerationService {
                 .map(CaseAuditEntryView::of)
                 .toList();
 
-        return new ModerationCaseDetail(ModerationCaseView.of(moderationCase), content, trail);
+        return new ModerationCaseDetail(ModerationCaseView.of(moderationCase), content, currentView, changed, trail);
     }
 
     /**
@@ -208,9 +212,11 @@ public class AdminModerationService {
     private void undoAction(
             User admin, ModerationCase moderationCase, FinalAction previous, FinalAction next) {
 
-        if (removesContent(previous) && !removesContent(next)) {
+        if (removesContent(previous) && !removesContent(next)
+                && moderationCase.isContentHiddenByCase()) {
             boolean restored =
                     contentLocator.restore(moderationCase.getTargetType(), moderationCase.getTargetId());
+            moderationCase.clearContentHidden();
             if (restored) {
                 auditLogger.record(
                         AuditActorType.ADMIN,
@@ -289,6 +295,7 @@ public class AdminModerationService {
 
         boolean hidden = contentLocator.hide(moderationCase.getTargetType(), moderationCase.getTargetId());
         if (hidden) {
+            moderationCase.recordContentHidden();
             auditLogger.record(
                     AuditActorType.ADMIN,
                     admin.getId(),

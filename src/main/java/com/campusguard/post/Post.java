@@ -42,6 +42,18 @@ public class Post {
     @Column(nullable = false, columnDefinition = "text")
     private String body;
 
+    @Column(nullable = false, length = 50)
+    private String category = "Study";
+
+    @Column(name = "pin_rank")
+    private Integer pinRank;
+
+    public String getCategory() { return category; }
+    public Integer getPinRank() { return pinRank; }
+    public void setCategory(String value) {
+        if (value != null && !value.isBlank()) category = value.trim();
+    }
+
     @CreationTimestamp
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;

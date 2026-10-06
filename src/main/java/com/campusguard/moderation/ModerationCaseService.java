@@ -21,10 +21,13 @@ public class ModerationCaseService {
 
     private final ModerationCaseRepository caseRepository;
     private final AuditLogger auditLogger;
+    private final ContentLocator contentLocator;
 
-    public ModerationCaseService(ModerationCaseRepository caseRepository, AuditLogger auditLogger) {
+    public ModerationCaseService(
+            ModerationCaseRepository caseRepository, AuditLogger auditLogger, ContentLocator contentLocator) {
         this.caseRepository = caseRepository;
         this.auditLogger = auditLogger;
+        this.contentLocator = contentLocator;
     }
 
     /**
@@ -52,6 +55,10 @@ public class ModerationCaseService {
         caseRepository.incrementReportCount(caseId);
 
         if (inserted > 0) {
+            ModerationCase opened = caseRepository.findById(caseId).orElseThrow();
+            ContentLocator.ModeratedContent evidence = contentLocator.captureForReport(targetType, targetId)
+                    .orElseThrow(() -> new IllegalStateException("Reported content disappeared before capture."));
+            opened.captureEvidence(evidence);
             auditLogger.record(
                     AuditActorType.SYSTEM,
                     null,

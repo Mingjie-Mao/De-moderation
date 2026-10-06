@@ -57,8 +57,9 @@ public class PostService {
         // a null timestamp for a row that has one. Flushing here also surfaces
         // constraint violations inside this call instead of at commit.
         MediaObject media = request.mediaId() == null ? null : mediaService.requireOwned(request.mediaId(), authorId);
-        Post post = postRepository.saveAndFlush(
-                new Post(request.forumKey(), author, request.title(), request.body() == null ? "" : request.body(), media));
+        Post post = new Post(request.forumKey(), author, request.title(), request.body() == null ? "" : request.body(), media);
+        post.setCategory(request.category());
+        postRepository.saveAndFlush(post);
 
         return PostResponse.of(post);
     }
@@ -112,6 +113,7 @@ public class PostService {
                 ? null
                 : mediaService.requireOwned(request.mediaId(), authorId);
         post.update(request.title(), request.body() == null ? "" : request.body(), media);
+        post.setCategory(request.category());
         return PostResponse.of(post);
     }
 

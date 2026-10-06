@@ -8,6 +8,8 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
+import org.springframework.data.jpa.repository.Lock;
+import jakarta.persistence.LockModeType;
 
 public interface PostRepository extends JpaRepository<Post, UUID> {
 
@@ -83,6 +85,11 @@ public interface PostRepository extends JpaRepository<Post, UUID> {
             where p.id = :id and p.deletedAt is null
             """)
     Optional<Post> findLiveById(@Param("id") UUID id);
+
+    /** Serialises evidence capture with a concurrent author edit or deletion. */
+    @Lock(LockModeType.PESSIMISTIC_READ)
+    @Query("select p from Post p where p.id = :id")
+    Optional<Post> findForEvidence(@Param("id") UUID id);
 
     /** Backs the authoring rate limit. Deleted posts still count: the cost being limited was already paid. */
     long countByAuthorIdAndCreatedAtAfter(UUID authorId, Instant since);

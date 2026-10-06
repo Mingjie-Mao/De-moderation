@@ -1,0 +1,31 @@
+{
+  "postId": "e4ee5de2-c0ee-458c-b2f0-dda555a563f1",
+  "caseId": "c58af91a-b5a5-46d6-bb91-59d97280bf29",
+  "engine": "gemini-3.5-flash-lite/v2",
+  "recommendation": "ALLOW",
+  "status": "RESOLVED",
+  "auditActions": [
+    "CASE_OPENED",
+    "REPORT_FILED",
+    "CASE_CLAIMED",
+    "VERDICT_RECORDED",
+    "CASE_RESOLVED"
+  ],
+  "workflowToResolvedSeconds": 18.3,
+  "analysisWaitSeconds": 9.5,
+  "testPostSoftDeleted": true,
+  "verifiedAt": "2026-10-05",
+  "api": "https://p01--de-moderation-api--z48dx52bgz5k.code.run",
+  "androidLiveSmoke": {
+    "device": "emulator-5554",
+    "tests": 1,
+    "failures": 0,
+    "memberPosts": 11,
+    "adminPosts": 11
+  },
+  "androidUnitTests": {
+    "tests": 57,
+    "failures": 0
+  },
+  "adminPagesDeployment": "https://c2eb6cf3.de-moderation-review-demo.pages.dev"
+}

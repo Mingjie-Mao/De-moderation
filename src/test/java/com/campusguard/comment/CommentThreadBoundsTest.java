@@ -19,17 +19,14 @@ import org.springframework.test.context.TestPropertySource;
 /**
  * The two ways a thread could grow without limit, and what stops each.
  *
- * <p>Depth was the sharper one. Replying to a reply had no ceiling and the read
- * path recurses once per level, so a chain of eight thousand answered the public
- * comments endpoint with a StackOverflowError — measured, on a real server, by
- * one account replying to itself. The ceiling lives in a check constraint so it
- * binds every writer rather than only the service that happens to write comments
- * today.
+ * <p>Depth was the sharper one. Replying to a reply had no ceiling and the old
+ * read path recursed once per level, so a chain of eight thousand answered the
+ * public comments endpoint with a StackOverflowError — measured, on a real
+ * server, by one account replying to itself. The ceiling lives in a check
+ * constraint so it binds every writer rather than only the current service.
  *
- * <p>Width is the milder one: a thread with a hundred thousand top-level comments
- * is not a crash, only a response nobody can use. Roots are paged; a root's
- * replies come with it, because half a conversation is not something a client can
- * reassemble.
+ * <p>Width is bounded per response, including a single root with many replies.
+ * Parent ids let the client assemble a conversation over successive pages.
  */
 @TestPropertySource(properties = {
     "campusguard.content.comments-per-user=500",
@@ -47,10 +44,10 @@ class CommentThreadBoundsTest extends AbstractIntegrationTest {
             parent = comment(author, postId, parent);
         }
 
-        // The root plus MAX_DEPTH levels beneath it all stored.
+        // The root plus MAX_DEPTH levels beneath it all stored and page together.
         mockMvc.perform(get("/api/posts/{id}/comments", postId))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.items", hasSize(1)));
+                .andExpect(jsonPath("$.items", hasSize(Comment.MAX_DEPTH + 1)));
     }
 
     @Test
@@ -70,9 +67,9 @@ class CommentThreadBoundsTest extends AbstractIntegrationTest {
                         .value(org.hamcrest.Matchers.containsString("Reply further up the thread")));
     }
 
-    /** The ceiling is on nesting, not on how many replies one comment may have. */
+    /** A wide single-root conversation cannot make one response unbounded. */
     @Test
-    void doesNotLimitHowWideOneCommentCanBe() throws Exception {
+    void pagesACommentWithManyDirectReplies() throws Exception {
         User author = newUser();
         UUID postId = createPost(author);
         UUID root = comment(author, postId, null);
@@ -81,12 +78,20 @@ class CommentThreadBoundsTest extends AbstractIntegrationTest {
             reply(author, postId, root).andExpect(status().isCreated());
         }
 
-        mockMvc.perform(get("/api/posts/{id}/comments", postId))
-                .andExpect(jsonPath("$.items[0].replies", hasSize(15)));
+        String first = mockMvc.perform(get("/api/posts/{id}/comments", postId).param("size", "10"))
+                .andExpect(jsonPath("$.items", hasSize(10)))
+                .andExpect(jsonPath("$.hasMore").value(true))
+                .andReturn().getResponse().getContentAsString();
+        String cursor = JsonPath.read(first, "$.nextCursor");
+        mockMvc.perform(get("/api/posts/{id}/comments", postId)
+                        .param("size", "10").param("cursor", cursor))
+                .andExpect(jsonPath("$.items", hasSize(6)))
+                .andExpect(jsonPath("$.hasMore").value(false))
+                .andExpect(jsonPath("$.items[0].parentCommentId").value(root.toString()));
     }
 
     @Test
-    void pagesTopLevelCommentsAndCarriesTheirRepliesAlong() throws Exception {
+    void pagesRootsAndRepliesInOneOrderedWalk() throws Exception {
         User author = newUser();
         UUID postId = createPost(author);
 
@@ -99,8 +104,8 @@ class CommentThreadBoundsTest extends AbstractIntegrationTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.items", hasSize(2)))
                 .andExpect(jsonPath("$.hasMore").value(true))
-                // A root arrives with its subtree; paging never splits one.
-                .andExpect(jsonPath("$.items[0].replies", hasSize(1)))
+                .andExpect(jsonPath("$.items[1].parentCommentId")
+                        .value(org.hamcrest.Matchers.notNullValue()))
                 .andReturn()
                 .getResponse()
                 .getContentAsString();
@@ -111,7 +116,9 @@ class CommentThreadBoundsTest extends AbstractIntegrationTest {
         mockMvc.perform(get("/api/posts/{id}/comments", postId).param("size", "2").param("cursor", cursor))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.items", hasSize(2)))
-                .andExpect(jsonPath("$.hasMore").value(true));
+                .andExpect(jsonPath("$.hasMore").value(true))
+                .andExpect(jsonPath("$.items[0].parentCommentId")
+                        .value(org.hamcrest.Matchers.nullValue()));
     }
 
     /** The last page says so, and offers no cursor to keep going with. */

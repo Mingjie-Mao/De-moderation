@@ -94,17 +94,29 @@ public class MediaService {
         }
     }
 
-    @Transactional(readOnly = true)
+    // This read can join a case-analysis transaction. Missing bytes are an
+    // evidence gap that analysis handles, so they must not mark that outer
+    // transaction rollback-only before it can send the case to human review.
+    @Transactional(readOnly = true, noRollbackFor = {NotFoundException.class, MediaStorageException.class})
     public StoredMedia read(UUID id) {
         MediaObject object = require(id);
-        if (media.countVisiblePostReferences(id) == 0
-                && media.countVisibleCommentReferences(id) == 0) {
+        if (!media.hasVisibleReference(id)) {
             throw new NotFoundException("Media " + id + " is not attached to visible content.");
         }
         // A row whose bytes have gone reads as a missing image rather than as a
         // server fault. That is the state an ephemeral container filesystem left
         // behind on every release, and a 500 for each of those images would have
         // turned lost pictures into broken pages.
+        return readBytes(id, object);
+    }
+
+    /** Only callers behind administrator or internal-service boundaries may use this. */
+    @Transactional(readOnly = true, noRollbackFor = {NotFoundException.class, MediaStorageException.class})
+    public StoredMedia readEvidence(UUID id) {
+        return readBytes(id, require(id));
+    }
+
+    private StoredMedia readBytes(UUID id, MediaObject object) {
         return storage.get(object.getStorageKey())
                 .map(bytes -> new StoredMedia(object, bytes))
                 .orElseThrow(() -> new NotFoundException("Media " + id + " is not available."));

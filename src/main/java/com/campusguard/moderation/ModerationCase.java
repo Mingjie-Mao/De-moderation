@@ -84,6 +84,27 @@ public class ModerationCase {
     @Column(name = "final_action", length = 20)
     private FinalAction finalAction;
 
+    /** Whether this case actually hid content that may be restored on revision. */
+    @Column(name = "content_hidden_by_case", nullable = false)
+    private boolean contentHiddenByCase;
+
+    // Frozen when the first report opens this case. Older cases keep null
+    // reportedAt and continue to use the live content as a legacy fallback.
+    @Column(name = "reported_at")
+    private Instant reportedAt;
+
+    @Column(name = "reported_title", length = 200)
+    private String reportedTitle;
+
+    @Column(name = "reported_body", columnDefinition = "text")
+    private String reportedBody;
+
+    @Column(name = "reported_author_id")
+    private UUID reportedAuthorId;
+
+    @Column(name = "reported_media_id")
+    private UUID reportedMediaId;
+
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "assigned_to")
     private User assignedTo;
@@ -164,6 +185,38 @@ public class ModerationCase {
         this.decidedBy = admin;
         this.decidedAt = Instant.now();
         this.finalAction = action;
+    }
+
+    public boolean isContentHiddenByCase() {
+        return contentHiddenByCase;
+    }
+
+    public void recordContentHidden() {
+        this.contentHiddenByCase = true;
+    }
+
+    public void clearContentHidden() {
+        this.contentHiddenByCase = false;
+    }
+
+    public void captureEvidence(ContentLocator.ModeratedContent content) {
+        if (reportedAt != null) {
+            throw new IllegalStateException("Evidence for case " + id + " has already been captured.");
+        }
+        if (content.targetType() != targetType || !content.targetId().equals(targetId)) {
+            throw new IllegalArgumentException("Evidence does not match this case's target.");
+        }
+        this.reportedAt = Instant.now();
+        this.reportedTitle = content.title();
+        this.reportedBody = content.body();
+        this.reportedAuthorId = content.authorId();
+        this.reportedMediaId = content.mediaId();
+    }
+
+    public java.util.Optional<ContentLocator.ModeratedContent> reportedContent() {
+        if (reportedAt == null) return java.util.Optional.empty();
+        return java.util.Optional.of(new ContentLocator.ModeratedContent(
+                targetType, targetId, reportedTitle, reportedBody, reportedAuthorId, reportedMediaId));
     }
 
     /**

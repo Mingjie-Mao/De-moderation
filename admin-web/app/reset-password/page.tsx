@@ -1,6 +1,7 @@
 'use client';
 
 import Link from 'next/link';
+import { apiFetch } from '../api-request';
 import { FormEvent, useState, useSyncExternalStore } from 'react';
 
 const API = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:8080';
@@ -22,7 +23,7 @@ export default function ResetPassword() {
     try {
       if (token) {
         if (password !== confirmation) throw new Error('两次输入的密码不一致。');
-        const response = await fetch(`${API}/api/auth/password-reset/confirm`, {
+        const response = await apiFetch(`${API}/api/auth/password-reset/confirm`, {
           method: 'POST', headers: {'Content-Type':'application/json'},
           body: JSON.stringify({token,newPassword:password}),
         });
@@ -32,7 +33,7 @@ export default function ResetPassword() {
         }
         setMessage('密码已更新。现在可以返回登录。'); setPassword(''); setConfirmation('');
       } else {
-        const response = await fetch(`${API}/api/auth/password-reset/request`, {
+        const response = await apiFetch(`${API}/api/auth/password-reset/request`, {
           method: 'POST', headers: {'Content-Type':'application/json'},
           body: JSON.stringify({account}),
         });

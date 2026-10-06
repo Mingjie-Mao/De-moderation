@@ -37,7 +37,8 @@ Four read-only tools:
 | `similarResolvedCases` | what reviewers did under a rule, 90 days, plus how often reports under it were dismissed |
 | `ruleText` | the wording and severity of one rule |
 
-The first two are fetched before the model is asked anything. The case under
+`authorHistory` and `similarResolvedCases` are fetched before the model is
+asked anything. The case under
 investigation is passed to every tool by the loop rather than named in the
 model's arguments, so there is no way to point one at a different case.
 
@@ -66,7 +67,7 @@ The read-only guarantee is a property of the database, declared on
 
 ## How good is it
 
-Measured on 16 scenarios, each run three times, against
+Historical measurement on 16 scenarios, each run three times, against
 `gemini-3.5-flash-lite`. A scenario is a situation — content, the author's
 record, the precedent around it — because an investigation exists to answer
 questions the content alone cannot.
@@ -82,6 +83,11 @@ mvn -Dtest=RealModelInvestigationBenchmarkTest -Dinvestigation.prompt=inv-v4 tes
 | stability — same answer every time | 0.938 | 0.938 |
 | grounding — cited what the case turns on | 0.813 | 0.875 |
 | cost | 1.0 lookups, ~2 100 prompt tokens | ~2 100 |
+
+The current fixture has 32 scenarios and the grounding check has changed.
+These stored 16-scenario results describe an earlier experiment; a full current
+32-scenario real-model run and consensus evaluation have not completed. Do not
+present this table as the current benchmark or as production accuracy.
 
 Four numbers rather than one, because an assistant fails in four ways a single
 accuracy figure averages into nothing: wrong recommendation, right
@@ -138,6 +144,10 @@ A case is investigated once and the brief is stored in `audit_log`; opening it
 again is free. `?force=true` asks for a fresh look and is charged. One reviewer
 may start 60 investigations an hour, which is the only place in this system
 where a click spends money directly.
+Before a model call, the service reserves the case in PostgreSQL. A simultaneous
+request receives `409` while the first one runs; it can then read the saved
+brief. The reservation expires after 15 minutes so a crashed process cannot
+block investigation indefinitely.
 
 ## Running it
 
@@ -190,8 +200,8 @@ Ordered by what is blocking what.
    already had a resolved case. Each record carries a hashed `authorKey`, the
    engine's decision and confidence beside the human's final action, and
    `priorResolvedCases` — which are exactly the fields the retrieval change above
-   needs. So the mechanism is verified and the corpus is not: 8 is three orders
-   of magnitude short of the few hundred that would make `similarResolvedCases`
+   needs. So the mechanism is verified and the corpus is not: 8 is far
+   short of the few hundred that would make `similarResolvedCases`
    mean "most similar" instead of "most recent", and no amount of work in this
    repository produces them. They come from a deployment that people actually
    moderate on, which is the argument for running one.

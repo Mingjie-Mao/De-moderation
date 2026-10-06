@@ -11,7 +11,7 @@ public record MyProfileView(
         String bio,
         UserRole role,
         UserStatus status,
-        Instant createdAt) {
+        Instant createdAt, String avatarUrl, int avatarColor, UUID avatarMediaId, String languageTag, String theme) {
 
     static MyProfileView of(User user) {
         return new MyProfileView(
@@ -22,6 +22,6 @@ public record MyProfileView(
                 user.getBio(),
                 user.getRole(),
                 user.getStatus(),
-                user.getCreatedAt());
+                user.getCreatedAt(), user.getAvatarUrl(), user.getAvatarColor(), user.getAvatarMediaId(), user.getLanguageTag(), user.getTheme());
     }
 }

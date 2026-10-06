@@ -6,3 +6,10 @@ target
 admin-web/node_modules
 admin-web/.vinext
 admin-web/dist
+.env.*
+**/.env*
+**/.secrets.local.json
+**/node_modules
+**/.wrangler
+**/__pycache__
+backups

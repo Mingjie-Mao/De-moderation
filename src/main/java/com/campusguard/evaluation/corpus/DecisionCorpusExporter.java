@@ -107,8 +107,9 @@ public class DecisionCorpusExporter {
         // Content the author hard-deleted is gone for good, and a row with no text
         // teaches nothing. Skipped rather than exported empty, so a count of rows
         // is a count of usable ones.
-        Optional<ContentLocator.ModeratedContent> content = contentLocator.findIncludingRemoved(
-                moderationCase.getTargetType(), moderationCase.getTargetId());
+        Optional<ContentLocator.ModeratedContent> content = moderationCase.reportedContent().or(() ->
+                contentLocator.findIncludingRemoved(
+                        moderationCase.getTargetType(), moderationCase.getTargetId()));
         if (content.isEmpty()) {
             return Optional.empty();
         }

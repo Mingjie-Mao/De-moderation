@@ -24,8 +24,8 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.testcontainers.containers.PostgreSQLContainer;
 
 /**
- * Integration tests run against a real PostgreSQL 16, the same major version the
- * application deploys on.
+ * Integration tests run against real PostgreSQL 16, matching local Compose.
+ * The public Neon demo uses PostgreSQL 18 and is validated separately.
  *
  * <p>An in-memory database would be faster but would not enforce the partial
  * index, the check constraints or the unique index that this schema relies on

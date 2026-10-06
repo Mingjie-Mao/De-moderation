@@ -1,0 +1,103 @@
+{
+  "verifiedAt": "2026-10-06",
+  "api": "https://p01--de-moderation-api--z48dx52bgz5k.code.run",
+  "image": "ghcr.io/mingjie-mao/de-moderation-backend@sha256:57289bf921ed1bcd1d0428ffc24f20829f9b51d08abb6e6ea4cbbb69c3ccfe98",
+  "method": "Sydney client; same existing Neon Sydney database; reused HTTPS; three sequential warm samples per endpoint; medians; no load benchmark",
+  "before": [
+    {
+      "path": "/api/posts?forum=anu&size=20",
+      "seconds": [
+        1.021,
+        0.964,
+        0.969
+      ],
+      "median": 0.969
+    },
+    {
+      "path": "/api/posts/cea81092-db06-40c3-928c-e3473c750590/comments?size=20",
+      "seconds": [
+        1.173,
+        1.154,
+        1.216
+      ],
+      "median": 1.173
+    },
+    {
+      "path": "/api/market",
+      "seconds": [
+        4.473,
+        4.44,
+        4.409
+      ],
+      "median": 4.44
+    },
+    {
+      "path": "/api/market/leaderboard",
+      "seconds": [
+        4.142,
+        4.152,
+        4.077
+      ],
+      "median": 4.142
+    }
+  ],
+  "after": [
+    {
+      "path": "/api/posts?forum=anu&size=20",
+      "seconds": [
+        1.037,
+        0.97,
+        0.974
+      ],
+      "median": 0.974
+    },
+    {
+      "path": "/api/posts/cea81092-db06-40c3-928c-e3473c750590/comments?size=20",
+      "seconds": [
+        1.318,
+        1.215,
+        1.243
+      ],
+      "median": 1.243
+    },
+    {
+      "path": "/api/market",
+      "seconds": [
+        1.951,
+        1.925,
+        1.916
+      ],
+      "median": 1.925
+    },
+    {
+      "path": "/api/market/leaderboard",
+      "seconds": [
+        1.35,
+        1.349,
+        1.344
+      ],
+      "median": 1.349
+    }
+  ],
+  "tests": {
+    "androidUnit": 57,
+    "androidDeviceWorkflows": 10,
+    "postgresCommunityMarket": 5,
+    "failures": 0
+  },
+  "schemaMigrationRequired": false,
+  "runtimeMemoryCheck": {
+    "pod": "de-moderation-api-84f4fc5d5c-m6ks9",
+    "minutesAfterStart": 13,
+    "cgroupCurrentMiB": 486.8,
+    "anonymousMiB": 374.8,
+    "fileCacheMiB": 108.9,
+    "inactiveFileMiB": 71.9,
+    "javaRssKiB": 404772,
+    "oomEvents": 0,
+    "oomKills": 0,
+    "restarts": 0,
+    "probesPassing": "3/3",
+    "note": "One live observation; file cache contributes to the near-limit dashboard value. Not a sustained-load or leak test."
+  }
+}

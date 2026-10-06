@@ -5,8 +5,9 @@ import java.util.UUID;
 
 public record ReportedContentView(String title, String body, UUID authorId, String mediaUrl) {
 
-    public static ReportedContentView of(ContentLocator.ModeratedContent content) {
+    public static ReportedContentView of(UUID caseId, ContentLocator.ModeratedContent content) {
         return new ReportedContentView(content.title(), content.body(), content.authorId(),
-                content.mediaId() == null ? null : "/api/media/" + content.mediaId());
+                content.mediaId() == null ? null
+                        : "/api/admin/moderation-cases/" + caseId + "/media/" + content.mediaId());
     }
 }

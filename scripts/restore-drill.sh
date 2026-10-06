@@ -12,11 +12,12 @@
 # Usage: scripts/restore-drill.sh [/path/to/campusguard-db-*.dump]
 #        with no argument, the newest dump in ./backups
 set -eu
+umask 077
 
 ROOT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 BACKUP_DIR=${BACKUP_DIR:-"$ROOT_DIR/backups"}
 IMAGE=${DRILL_IMAGE:-postgres:16.10-alpine}
-CONTAINER=campusguard-restore-drill
+CONTAINER=campusguard-restore-drill-$$
 DRILL_DB=drill
 DRILL_USER=drill
 DRILL_PASSWORD=drill
@@ -27,9 +28,11 @@ pass() { printf 'PASS  %s\n' "$1"; }
 fail() { printf 'FAIL  %s\n' "$1"; FAILURES=$((FAILURES + 1)); }
 
 cleanup() {
-  docker rm -f "$CONTAINER" >/dev/null 2>&1 || true
+  docker rm -f -v "$CONTAINER" >/dev/null 2>&1 || true
+  rm -f /tmp/drill-restore.$$
 }
-trap cleanup EXIT INT TERM
+trap cleanup EXIT
+trap 'exit 1' INT TERM
 
 # --- pick the dump -------------------------------------------------------
 if [ "$#" -ge 1 ]; then
@@ -42,6 +45,11 @@ if [ -z "${DUMP:-}" ] || [ ! -f "$DUMP" ]; then
   exit 2
 fi
 
+if ! BACKUP_VALIDATOR_IMAGE="${BACKUP_VALIDATOR_IMAGE:-$IMAGE}" "$ROOT_DIR/scripts/verify-backup.sh" "$DUMP"; then
+  echo "Drill stopped: the dump has no usable application schema." >&2
+  exit 1
+fi
+
 echo "Restore drill"
 echo "============="
 note "dump:  $DUMP"
@@ -50,19 +58,31 @@ echo
 
 # --- checksum, when the backup recorded one ------------------------------
 STAMP=$(basename "$DUMP" | sed -e 's/^campusguard-db-//' -e 's/\.dump$//')
-SUMS="$BACKUP_DIR/campusguard-$STAMP.sha256"
+SUMS="$(dirname "$DUMP")/campusguard-$STAMP.sha256"
 if [ -f "$SUMS" ]; then
-  # Only this dump's line, because the media tarball may legitimately be gone
-  # after the retention sweep while the dump is still here.
-  if grep -F "$(basename "$DUMP")" "$SUMS" > /tmp/drill-sums.$$ 2>/dev/null; then
-    if (cd "$(dirname "$DUMP")" && \
-        { command -v sha256sum >/dev/null 2>&1 && sha256sum -c /tmp/drill-sums.$$ || shasum -a 256 -c /tmp/drill-sums.$$; }) >/dev/null 2>&1; then
+  # Old checksum files contain absolute paths. Compare the digest with the
+  # actual file being drilled, including when it was downloaded elsewhere.
+  expected=
+  while read -r digest recorded; do
+    if [ "$(basename "$recorded")" = "$(basename "$DUMP")" ]; then
+      expected=$digest
+      break
+    fi
+  done < "$SUMS"
+  if [ -z "$expected" ]; then
+    fail "checksum file has no entry for this dump"
+  else
+    if command -v sha256sum >/dev/null 2>&1; then
+      actual=$(sha256sum "$DUMP" | awk '{print $1}')
+    else
+      actual=$(shasum -a 256 "$DUMP" | awk '{print $1}')
+    fi
+    if [ "$actual" = "$expected" ]; then
       pass "checksum matches what the backup recorded"
     else
       fail "checksum does not match; the dump is corrupt or was rewritten"
     fi
   fi
-  rm -f /tmp/drill-sums.$$
 else
   note "no checksum file for this stamp; skipping that check"
 fi
@@ -79,7 +99,10 @@ printf 'waiting for the drill database'
 ready=0
 i=0
 while [ "$i" -lt 60 ]; do
-  if docker exec "$CONTAINER" pg_isready -U "$DRILL_USER" -d "$DRILL_DB" >/dev/null 2>&1; then
+  # pg_isready reports the server as ready before POSTGRES_DB has been
+  # created by the entrypoint. Require a real connection to the drill DB.
+  if docker exec "$CONTAINER" psql -X -v ON_ERROR_STOP=1 \
+      -U "$DRILL_USER" -d "$DRILL_DB" -tAc 'SELECT 1' >/dev/null 2>&1; then
     ready=1
     break
   fi

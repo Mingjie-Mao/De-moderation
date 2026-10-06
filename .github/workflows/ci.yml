@@ -18,10 +18,12 @@ jobs:
       - uses: actions/checkout@v7
       - uses: actions/setup-java@v6
         with: { distribution: temurin, java-version: '21', cache: maven }
-      # The suite starts PostgreSQL and MinIO through Testcontainers, so the
+      # The suite starts PostgreSQL and S3Mock through Testcontainers, so the
       # runner's Docker daemon is a dependency of `verify` rather than of the
       # image build below.
       - run: mvn --batch-mode verify
+      - name: Validate production Caddyfile
+        run: docker run --rm -e DOMAIN=example.test -v "$PWD/deploy/Caddyfile:/etc/caddy/Caddyfile:ro" caddy:2.10-alpine caddy validate --config /etc/caddy/Caddyfile
       - run: docker build -t campusguard-backend:ci .
 
   admin-web:

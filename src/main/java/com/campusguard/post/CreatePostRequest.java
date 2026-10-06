@@ -7,7 +7,11 @@ public record CreatePostRequest(
         @NotBlank @Size(max = 50) String forumKey,
         @NotBlank @Size(max = 200) String title,
         @Size(max = 20_000) String body,
-        java.util.UUID mediaId) {
+        java.util.UUID mediaId, @Size(max = 50) String category) {
+
+    public CreatePostRequest(String forumKey, String title, String body, java.util.UUID mediaId) {
+        this(forumKey, title, body, mediaId, null);
+    }
 
     public CreatePostRequest(String forumKey, String title, String body) {
         this(forumKey, title, body, null);

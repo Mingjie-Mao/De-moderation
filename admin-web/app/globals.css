@@ -103,3 +103,4 @@ h1,h2,p { margin-top:0; } h1 { margin-bottom:0; font-size:clamp(30px,4vw,48px); 
 .cited-case:disabled { color:#8b958c; cursor:default; }
 .back-link { display:block; margin:0 0 8px; padding:0; border:0; background:none; color:#315f49; font-size:12px; font-weight:750; cursor:pointer; }
 .back-link:hover:not(:disabled) { text-decoration:underline; }
+.pagination { display:flex; align-items:center; justify-content:center; gap:12px; padding:14px 0 2px; color:#66736a; font-size:12px; }

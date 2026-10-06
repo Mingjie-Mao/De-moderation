@@ -42,7 +42,7 @@ class MediaApiIntegrationTest extends AbstractIntegrationTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(json(new CreatePostRequest(uniqueForumKey(), "Image", "", mediaId))))
                 .andExpect(status().isCreated())
-                .andExpect(jsonPath("$.mediaUrl").value("/api/media/" + mediaId))
+                .andExpect(jsonPath("$.mediaUrl").value("/api/media/" + mediaId + "?v=2"))
                 .andReturn().getResponse().getContentAsString();
         UUID postId = UUID.fromString(JsonPath.read(created, "$.id"));
 

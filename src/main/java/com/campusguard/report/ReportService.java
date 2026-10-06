@@ -8,6 +8,8 @@ import com.campusguard.common.NotFoundException;
 import com.campusguard.common.TargetType;
 import com.campusguard.common.TooManyRequestsException;
 import com.campusguard.moderation.ModerationCaseService;
+import com.campusguard.moderation.ModerationQueueWakeup;
+import org.springframework.context.ApplicationEventPublisher;
 import com.campusguard.post.PostRepository;
 import com.campusguard.user.User;
 import com.campusguard.user.UserRepository;
@@ -29,6 +31,7 @@ public class ReportService {
     private final ModerationCaseService moderationCaseService;
     private final AuditLogger auditLogger;
     private final ReportProperties reportProperties;
+    private final ApplicationEventPublisher events;
 
     public ReportService(
             ReportRepository reportRepository,
@@ -37,7 +40,8 @@ public class ReportService {
             UserRepository userRepository,
             ModerationCaseService moderationCaseService,
             AuditLogger auditLogger,
-            ReportProperties reportProperties) {
+            ReportProperties reportProperties,
+            ApplicationEventPublisher events) {
         this.reportRepository = reportRepository;
         this.postRepository = postRepository;
         this.commentRepository = commentRepository;
@@ -45,6 +49,7 @@ public class ReportService {
         this.moderationCaseService = moderationCaseService;
         this.auditLogger = auditLogger;
         this.reportProperties = reportProperties;
+        this.events = events;
     }
 
     @Transactional
@@ -83,6 +88,9 @@ public class ReportService {
                 request.targetId(),
                 Map.of("reportId", report.getId().toString(), "caseId", caseId.toString(), "reason", request.reason().name()));
 
+        // The listener runs only after this transaction commits. The durable
+        // case row remains the source of truth if this process stops first.
+        events.publishEvent(new ModerationQueueWakeup(caseId));
         return ReportResponse.of(report);
     }
 

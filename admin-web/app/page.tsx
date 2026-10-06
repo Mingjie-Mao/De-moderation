@@ -1,16 +1,18 @@
 'use client';
 
-import { FormEvent, useCallback, useEffect, useMemo, useState } from 'react';
+import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
+import { apiFetch } from './api-request';
 
 const API = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:8080';
 type CaseStatus = 'AWAITING_REVIEW' | 'RESOLVED';
 type FinalAction = 'NONE' | 'HIDE' | 'DELETE' | 'BAN';
 type Tab = 'queue' | 'resolved' | 'appeals';
 type ModerationCase = { id:string; targetType:string; targetId:string; status:CaseStatus; reportCount:number; engine?:string; recommendedDecision?:string; confidence?:number; rationale?:string; ruleCodes?:string[]; finalAction?:FinalAction; assignedTo?:string; reviewDueAt?:string; createdAt:string; overdue?:boolean };
-type CaseDetail = { moderationCase:ModerationCase; content?:{ title?:string; body?:string; authorId:string; mediaUrl?:string }; auditTrail:Array<{ action:string; actorId?:string; payload?:Record<string,unknown>; at:string }> };
+type ReportedContent = { title?:string; body?:string; authorId:string; mediaUrl?:string };
+type CaseDetail = { moderationCase:ModerationCase; content?:ReportedContent; currentContent?:ReportedContent; contentChanged:boolean; auditTrail:Array<{ action:string; actorId?:string; payload?:Record<string,unknown>; at:string }> };
 type Appeal = { id:string; caseId:string; appellantId:string; reason:string; status:string; response?:string; createdAt:string };
-type Session = { accessToken:string; userId:string; username:string };
+type Session = { accessToken:string; refreshToken:string; userId:string; username:string };
 type EngineStatus = { activeEngine:string; fallbackEngine:string; llmActive:boolean };
 type EvidenceStrength = 'SETTLED' | 'LEANING' | 'OPEN';
 type Brief = { outcome:'COMPLETE'|'PARTIAL'|'INCONCLUSIVE'; summary:string; recommendation?:FinalAction; evidenceStrength?:EvidenceStrength; counterEvidence?:string; citedCaseIds:string[]; promptVersion:string; producedAt:string };
@@ -29,6 +31,29 @@ function elapsed(value:string) {
 }
 function errorText(error:unknown) { return error instanceof Error ? error.message : '请求失败，请稍后重试。'; }
 
+function EvidenceImage({path,read}:{path:string;read:(path:string,signal:AbortSignal)=>Promise<Blob>}) {
+  const [imageUrl,setImageUrl] = useState<string|null>(null);
+  const [failed,setFailed] = useState(false);
+  useEffect(() => {
+    const controller = new AbortController();
+    let objectUrl:string|null = null;
+    void read(path,controller.signal)
+      .then(blob => {
+        if (controller.signal.aborted) return;
+        objectUrl = URL.createObjectURL(blob);
+        setImageUrl(objectUrl);
+      })
+      .catch(() => { if (!controller.signal.aborted) setFailed(true); });
+    return () => {
+      controller.abort();
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [path,read]);
+  if (failed) return <p className="brief-empty">附件暂不可读，请检查媒体存储。</p>;
+  if (!imageUrl) return <p className="brief-empty">正在读取附件…</p>;
+  return <img className="evidence" src={imageUrl} alt="举报内容附件" />; // eslint-disable-line @next/next/no-img-element
+}
+
 export default function Home() {
   // Restored after the first paint, not during it. Reading sessionStorage in the
   // initial state made the server render a logged-out page and the browser render
@@ -38,6 +63,9 @@ export default function Home() {
   // signed in, which `restoring` covers.
   const [session, setSession] = useState<Session|null>(null);
   const [restoring, setRestoring] = useState(true);
+  const sessionRef = useRef<Session|null>(null);
+  const sessionGeneration = useRef(0);
+  const rotation = useRef<Promise<Session|null>|null>(null);
 
   useEffect(() => {
     try {
@@ -47,14 +75,22 @@ export default function Home() {
       // so reading it anywhere but after mount is the hydration mismatch this
       // effect was written to avoid. Reading an external system on mount is the
       // case the rule itself lists as legitimate; it cannot tell that from here.
-      // eslint-disable-next-line react-hooks/set-state-in-effect
-      if (saved) setSession(JSON.parse(saved));
+      if (saved) {
+        const parsed = JSON.parse(saved) as Partial<Session>;
+        if (parsed.accessToken && parsed.userId && parsed.username) {
+          const restored = {...parsed,refreshToken:parsed.refreshToken||''} as Session;
+          sessionRef.current = restored;
+          // eslint-disable-next-line react-hooks/set-state-in-effect
+          setSession(restored);
+        }
+      }
     } catch { sessionStorage.removeItem('campusguard.admin.session'); }
     finally { setRestoring(false); }
   }, []);
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [tab, setTab] = useState<Tab>('queue');
+  const [page, setPage] = useState(0);
   const [cases, setCases] = useState<ModerationCase[]>([]);
   const [appeals, setAppeals] = useState<Appeal[]>([]);
   const [detail, setDetail] = useState<CaseDetail|null>(null);
@@ -72,44 +108,104 @@ export default function Home() {
   const [message, setMessage] = useState('');
 
   const logout = useCallback(() => {
+    sessionGeneration.current += 1;
+    rotation.current = null;
+    sessionRef.current = null;
     sessionStorage.removeItem('campusguard.admin.session');
     setSession(null); setDetail(null); setBrief(null); setTrail([]); setCases([]); setAppeals([]);
   }, []);
 
+  const rotateSession = useCallback(():Promise<Session|null> => {
+    if (rotation.current) return rotation.current;
+    const current = sessionRef.current;
+    if (!current?.refreshToken) return Promise.resolve(null);
+    const generation = sessionGeneration.current;
+    const pending = (async () => {
+      try {
+        const response = await apiFetch(`${API}/api/auth/refresh`, {
+          method:'POST',headers:{'Content-Type':'application/json',Accept:'application/json'},
+          body:JSON.stringify({refreshToken:current.refreshToken}),
+        });
+        if (response.status === 400 || response.status === 401 || response.status === 403) return null;
+        if (!response.ok) throw new Error('暂时无法刷新会话，请稍后重试。');
+        const body = await response.json() as Partial<Session>;
+        if (!body.accessToken || !body.refreshToken || !body.userId || !body.username) return null;
+        if (generation !== sessionGeneration.current) return null;
+        const next = body as Session;
+        sessionRef.current = next;
+        sessionStorage.setItem('campusguard.admin.session',JSON.stringify(next));
+        setSession(next);
+        return next;
+      } catch (error) {
+        // A network outage must not discard a still-valid refresh token.
+        throw error instanceof Error ? error : new Error('暂时无法刷新会话，请稍后重试。');
+      }
+    })();
+    rotation.current = pending;
+    const clearRotation = () => { if (rotation.current === pending) rotation.current = null; };
+    void pending.then(clearRotation, clearRotation);
+    return pending;
+  }, []);
+
+  const authorizedFetch = useCallback(async (path:string, init?:RequestInit):Promise<Response> => {
+    const send = (token:string|null) => {
+      const headers = new Headers(init?.headers);
+      if (!headers.has('Accept')) headers.set('Accept','application/json');
+      if (init?.body && !headers.has('Content-Type')) headers.set('Content-Type','application/json');
+      if (token) headers.set('Authorization',`Bearer ${token}`);
+      return apiFetch(`${API}${path}`,{...init,headers});
+    };
+    const generation = sessionGeneration.current;
+    const originalToken = sessionRef.current?.accessToken||null;
+    let response = await send(originalToken);
+    if (response.status !== 401 || !originalToken) return response;
+    if (generation !== sessionGeneration.current) throw new Error('会话已更换，请重试。');
+    // A parallel request may already have rotated the one-time refresh token.
+    const current = sessionRef.current;
+    const next = current?.accessToken !== originalToken ? current : await rotateSession();
+    if (!next) {
+      logout();
+      throw new Error('会话已过期，请重新登录。');
+    }
+    response = await send(next.accessToken);
+    if (response.status === 401) {
+      if (generation === sessionGeneration.current) logout();
+      throw new Error('会话已失效，请重新登录。');
+    }
+    return response;
+  },[logout,rotateSession]);
+
   const request = useCallback(async <T,>(path:string, init?:RequestInit):Promise<T> => {
-    const response = await fetch(`${API}${path}`, {
-      ...init,
-      headers: {
-        Accept:'application/json',
-        ...(init?.body ? {'Content-Type':'application/json'} : {}),
-        ...(session ? {Authorization:`Bearer ${session.accessToken}`} : {}),
-        ...init?.headers,
-      },
-    });
-    if (response.status === 401 && session) logout();
+    const response = await authorizedFetch(path,init);
     if (!response.ok) {
       const problem = await response.json().catch(() => ({})) as {detail?:string;title?:string};
       throw new Error(problem.detail || problem.title || `HTTP ${response.status}`);
     }
     if (response.status === 204) return undefined as T;
     return response.json() as Promise<T>;
-  }, [logout, session]);
+  }, [authorizedFetch]);
+
+  const readEvidence = useCallback(async (path:string,signal:AbortSignal) => {
+    const response = await authorizedFetch(path,{signal});
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    return response.blob();
+  },[authorizedFetch]);
 
   const refresh = useCallback(async () => {
     if (!session) return;
     setBusy(true); setMessage('');
     try {
-      if (tab === 'appeals') setAppeals(await request<Appeal[]>('/api/admin/appeals?status=PENDING&size=100'));
+      if (tab === 'appeals') setAppeals(await request<Appeal[]>(`/api/admin/appeals?status=PENDING&size=100&page=${page}`));
       else {
         const status:CaseStatus = tab === 'queue' ? 'AWAITING_REVIEW' : 'RESOLVED';
-        const rows = await request<ModerationCase[]>(`/api/admin/moderation-cases?status=${status}&size=100`);
+        const rows = await request<ModerationCase[]>(`/api/admin/moderation-cases?status=${status}&size=100&page=${page}`);
         const checkedAt = Date.now();
         setCases(rows.map(item => ({...item, overdue:!!item.reviewDueAt && new Date(item.reviewDueAt).getTime() < checkedAt})));
       }
       setEngine(await request<EngineStatus>('/api/moderation/status'));
     } catch (error) { setMessage(errorText(error)); }
     finally { setBusy(false); }
-  }, [request, session, tab]);
+  }, [request, session, tab, page]);
   useEffect(() => {
     const timer = window.setTimeout(() => void refresh(), 0);
     return () => window.clearTimeout(timer);
@@ -118,11 +214,14 @@ export default function Home() {
   const login = async (event:FormEvent) => {
     event.preventDefault(); setBusy(true); setMessage('');
     try {
-      const response = await fetch(`${API}/api/auth/login`, {method:'POST', headers:{'Content-Type':'application/json',Accept:'application/json'}, body:JSON.stringify({username,password})});
-      const body = await response.json().catch(() => ({})) as {detail?:string;accessToken?:string;userId?:string;username?:string};
+      const response = await apiFetch(`${API}/api/auth/login`, {method:'POST', headers:{'Content-Type':'application/json',Accept:'application/json'}, body:JSON.stringify({username,password})});
+      const body = await response.json().catch(() => ({})) as {detail?:string;accessToken?:string;refreshToken?:string;userId?:string;username?:string};
       if (!response.ok) throw new Error(body.detail || '用户名或密码不正确。');
-      if (!body.accessToken || !body.userId || !body.username) throw new Error('登录响应不完整，请检查后端版本。');
-      const next = {accessToken:body.accessToken,userId:body.userId,username:body.username};
+      if (!body.accessToken || !body.refreshToken || !body.userId || !body.username) throw new Error('登录响应不完整，请检查后端版本。');
+      const next = {accessToken:body.accessToken,refreshToken:body.refreshToken,userId:body.userId,username:body.username};
+      sessionGeneration.current += 1;
+      rotation.current = null;
+      sessionRef.current = next;
       sessionStorage.setItem('campusguard.admin.session', JSON.stringify(next));
       setSession(next); setPassword('');
     } catch (error) { setMessage(errorText(error)); }
@@ -137,10 +236,10 @@ export default function Home() {
     setBusy(true); setMessage('');
     try {
       const next = await request<CaseDetail>(`/api/admin/moderation-cases/${id}`);
-      setDetail(next); setNote(''); setBrief(null); setTrail(from);
       // Fetched, not run. Opening a case shows a brief somebody already paid for
       // and never starts one on its own.
-      setBrief(await request<Brief|undefined>(`/api/admin/moderation-cases/${id}/investigation`) ?? null);
+      const existing = await request<Brief|undefined>(`/api/admin/moderation-cases/${id}/investigation`);
+      setDetail(next); setNote(''); setBrief(existing ?? null); setTrail(from);
     }
     catch (error) { setMessage(errorText(error)); }
     finally { setBusy(false); }
@@ -195,16 +294,16 @@ export default function Home() {
 
   return <main className="app-shell">
     <aside className="sidebar"><div className="brand-mark">D</div><nav aria-label="主导航">
-      <button className={`nav-item ${tab==='queue'?'active':''}`} onClick={()=>{setTab('queue');setDetail(null);}}>队</button>
-      <button className={`nav-item ${tab==='resolved'?'active':''}`} onClick={()=>{setTab('resolved');setDetail(null);}}>录</button>
-      <button className={`nav-item ${tab==='appeals'?'active':''}`} onClick={()=>{setTab('appeals');setDetail(null);}}>诉</button>
+      <button className={`nav-item ${tab==='queue'?'active':''}`} onClick={()=>{setTab('queue');setPage(0);setDetail(null);}}>队</button>
+      <button className={`nav-item ${tab==='resolved'?'active':''}`} onClick={()=>{setTab('resolved');setPage(0);setDetail(null);}}>录</button>
+      <button className={`nav-item ${tab==='appeals'?'active':''}`} onClick={()=>{setTab('appeals');setPage(0);setDetail(null);}}>诉</button>
     </nav><button className="profile-dot" title="退出登录" onClick={logout}>{session.username.slice(0,1).toUpperCase()}</button></aside>
     <section className="workspace">
       <header className="topbar"><div><p className="eyebrow">CampusGuard / De-Moderation</p><h1>{tab==='queue'?'审核工作台':tab==='resolved'?'裁决记录':'申诉中心'}</h1></div>
         <div className={`engine-pill ${engine?.llmActive?'':'fallback'}`}><span />{engine?.llmActive?`${engine.activeEngine} 正常运行`:`当前使用 ${engine?.activeEngine||'规则引擎'}`}</div></header>
       {message && <p className="alert page-alert">{message}</p>}
       <div className="metrics">
-        <article><strong>{String(tab==='appeals'?appeals.length:cases.length).padStart(2,'0')}</strong><span>{tab==='appeals'?'待处理申诉':'当前列表'}</span><small>来自服务器实时数据</small></article>
+        <article><strong>{String(tab==='appeals'?appeals.length:cases.length).padStart(2,'0')}</strong><span>{tab==='appeals'?'本页待处理申诉':'当前列表'}</span><small>来自服务器实时数据</small></article>
         <article><strong>{String(metrics.overdue).padStart(2,'0')}</strong><span>已超过 SLA</span><small>按 reviewDueAt 计算</small></article>
         <article><strong>{String(metrics.assigned).padStart(2,'0')}</strong><span>已被认领</span><small>避免多人重复裁决</small></article>
         <article><strong>{engine?.llmActive?'AI':'规则'}</strong><span>当前审核引擎</span><small>{engine?.activeEngine||'正在读取状态'}</small></article>
@@ -223,12 +322,24 @@ export default function Home() {
             <div className="case-meta"><span><b>{item.reportCount}</b> 次举报</span><span>{item.recommendedDecision||'待分析'} · {item.confidence==null?'—':`${Math.round(item.confidence*100)}%`}</span><span>{item.engine||'等待 worker'}</span></div>
             <div className="actions"><button className="primary" onClick={()=>openCase(item.id)}>查看并处理 →</button></div>
           </article>;})}{!cases.length&&!busy&&<div className="empty">这个队列目前是空的。</div>}</div>}
+          <div className="pagination">
+            <button className="secondary" disabled={busy||page===0} onClick={()=>setPage(value=>value-1)}>上一页</button>
+            <span>第 {page+1} 页</span>
+            <button className="secondary" disabled={busy||(tab==='appeals'?appeals.length:cases.length)<100}
+              onClick={()=>setPage(value=>value+1)}>下一页</button>
+          </div>
         </section>
         {detail?<aside className="detail-panel"><button className="detail-close" onClick={()=>setDetail(null)}>×</button>
           {trail.length>0&&<button className="back-link" disabled={busy} onClick={()=>openCase(trail[trail.length-1],trail.slice(0,-1))}>← 返回案件 {trail[trail.length-1].slice(0,8)}</button>}
           <p className="eyebrow">案件 {detail.moderationCase.id.slice(0,8)}</p>
-          <h2>{detail.content?.title||(detail.moderationCase.targetType==='POST'?'举报帖子':'举报评论')}</h2><p className="content-body">{detail.content?.body||'原内容已不可用。'}</p>
-          {detail.content?.mediaUrl&&<img className="evidence" src={`${API}${detail.content.mediaUrl}`} alt="举报内容附件" /> /* eslint-disable-line @next/next/no-img-element */}
+          <p className="eyebrow">举报时留存的内容</p>
+          <h2>{detail.content?.title||(detail.moderationCase.targetType==='POST'?'举报帖子':'举报评论')}</h2><p className="content-body">{detail.content?.body??'原内容已不可用。'}</p>
+          {detail.content?.mediaUrl&&<EvidenceImage key={detail.content.mediaUrl} path={detail.content.mediaUrl} read={readEvidence} />}
+          {detail.contentChanged&&<section className="brief"><p className="eyebrow">内容后来发生变更</p>
+            {detail.currentContent?<><h3>{detail.currentContent.title||'当前内容'}</h3><p className="content-body">{detail.currentContent.body}</p>
+              {detail.currentContent.mediaUrl&&<EvidenceImage key={detail.currentContent.mediaUrl} path={detail.currentContent.mediaUrl} read={readEvidence} />}</>
+              :<p>当前内容已不可用；上方是举报时留存的版本。</p>}
+          </section>}
           <dl><div><dt>建议</dt><dd>{detail.moderationCase.recommendedDecision||'—'}</dd></div><div><dt>置信度</dt><dd>{detail.moderationCase.confidence==null?'—':`${Math.round(detail.moderationCase.confidence*100)}%`}</dd></div><div><dt>规则</dt><dd>{detail.moderationCase.ruleCodes?.join(', ')||'—'}</dd></div></dl>
           <section className="brief">
             <div className="brief-head"><p className="eyebrow">调查助手</p>

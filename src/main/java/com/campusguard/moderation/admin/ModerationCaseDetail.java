@@ -10,5 +10,9 @@ import java.util.List;
  *     itself information the reviewer needs rather than an error
  */
 public record ModerationCaseDetail(
-        ModerationCaseView moderationCase, ReportedContentView content, List<CaseAuditEntryView> auditTrail) {
+        ModerationCaseView moderationCase,
+        ReportedContentView content,
+        ReportedContentView currentContent,
+        boolean contentChanged,
+        List<CaseAuditEntryView> auditTrail) {
 }

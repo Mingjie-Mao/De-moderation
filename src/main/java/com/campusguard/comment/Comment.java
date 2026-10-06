@@ -29,10 +29,8 @@ public class Comment {
     private Post post;
 
     /**
-     * Null for a top-level comment. The thread is stored as a plain parent
-     * pointer and assembled in memory after a single query per post, rather than
-     * walked recursively: a campus thread is small enough that one flat read
-     * beats a recursive CTE, and the shape stays obvious to read.
+     * Null for a top-level comment. Pages are returned flat; clients use this
+     * parent pointer to assemble the tree across page boundaries.
      */
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "parent_comment_id")

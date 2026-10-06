@@ -10,15 +10,13 @@ import com.campusguard.post.PostRepository;
 import com.campusguard.user.User;
 import com.campusguard.user.UserRepository;
 import com.campusguard.user.UserRole;
-import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 import java.time.Instant;
 import java.util.UUID;
 import com.campusguard.common.PageCursor;
 import com.campusguard.media.MediaObject;
 import com.campusguard.media.MediaService;
+import com.campusguard.media.MediaUrls;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
@@ -33,18 +31,19 @@ public class CommentService {
     private final UserRepository userRepository;
     private final ContentRateLimitProperties rateLimits;
     private final MediaService mediaService;
+    private final com.campusguard.community.CommunityNotifications notifications;
 
     public CommentService(
             CommentRepository commentRepository,
             PostRepository postRepository,
             UserRepository userRepository,
             ContentRateLimitProperties rateLimits,
-            MediaService mediaService) {
+            MediaService mediaService, com.campusguard.community.CommunityNotifications notifications) {
         this.commentRepository = commentRepository;
         this.postRepository = postRepository;
         this.userRepository = userRepository;
         this.rateLimits = rateLimits;
-        this.mediaService = mediaService;
+        this.mediaService = mediaService; this.notifications=notifications;
     }
 
     @Transactional
@@ -92,12 +91,20 @@ public class CommentService {
                 commentRepository.saveAndFlush(new Comment(
                         post, parent, author, request.body() == null ? "" : request.body(), media));
 
+        notifications.send(authorId,post.getAuthor().getId(),"COMMENT","commented on your post","POST",postId);
+        if(parent!=null && !parent.getAuthor().getId().equals(post.getAuthor().getId()))
+            notifications.send(authorId,parent.getAuthor().getId(),"COMMENT","replied to your comment","POST",postId);
+        var mentions=java.util.regex.Pattern.compile("(?<![A-Za-z0-9_])@([A-Za-z0-9_]{3,50})").matcher(saved.getBody());
+        var mentioned=new java.util.HashSet<UUID>();
+        while(mentions.find()) userRepository.findByUsername(mentions.group(1)).ifPresent(u->{
+            if(mentioned.add(u.getId())) notifications.send(authorId,u.getId(),"MENTION","mentioned you in a comment","POST",postId);
+        });
         return new CommentResponse(
                 saved.getId(),
                 parent == null ? null : parent.getId(),
                 AuthorView.of(author),
                 saved.getBody(),
-                saved.getMedia() == null ? null : "/api/media/" + saved.getMedia().getId(),
+                saved.getMedia() == null ? null : MediaUrls.publicUrl(saved.getMedia().getId()),
                 saved.getCreatedAt(),
                 List.of());
     }
@@ -114,7 +121,7 @@ public class CommentService {
                 ? null
                 : mediaService.requireOwned(request.mediaId(), authorId);
         comment.update(request.body() == null ? "" : request.body(), media);
-        return toResponse(comment, Map.of());
+        return toResponse(comment);
     }
 
     @Transactional
@@ -140,27 +147,13 @@ public class CommentService {
     }
 
     /**
-     * One query for the whole thread, assembled into a tree in memory.
+     * One bounded page of comments in creation order, roots and replies alike.
      *
-     * <p>The alternative, a recursive CTE, wins on very deep threads but costs a
-     * query that no longer maps onto an entity and is harder to read. A campus
-     * thread is small; a single indexed read plus an in-memory pass is both
-     * faster here and easier to reason about.
+     * <p>Paging only roots left one popular root free to pull the entire reply
+     * table into memory. A page can now end between a parent and its child;
+     * {@code parentCommentId} lets clients assemble the tree across pages.
      */
     @Transactional(readOnly = true)
-    /**
-     * One page of a thread: top-level comments in the order they were written,
-     * each carrying its replies.
-     *
-     * <p>Used to return every comment on a post in one unbounded response. That
-     * was fine until a post had a lot of comments, and the depth ceiling only
-     * fixed the other half of the problem — a thread can still be wide.
-     *
-     * <p>Roots are what gets paged, because a reply cannot be rendered without
-     * the comment it answers: handing a client half a conversation would make it
-     * reassemble something it cannot. Depth is bounded by a check constraint
-     * instead, so a root's subtree has a ceiling of its own.
-     */
     public CommentPage thread(UUID postId, String cursor, int size) {
         if (!postRepository.existsByIdAndDeletedAtIsNull(postId)) {
             throw new NotFoundException("No post with id " + postId);
@@ -170,21 +163,13 @@ public class CommentService {
 
         // One past the page, so "is there more" costs a row rather than a count.
         Pageable window = PageRequest.of(0, size + 1);
-        List<Comment> roots = from == null
-                ? commentRepository.findRootsFirstPage(postId, window)
-                : commentRepository.findRootsAfter(postId, from.createdAt(), from.id(), window);
+        List<Comment> rows = from == null
+                ? commentRepository.findThreadFirstPage(postId, window)
+                : commentRepository.findThreadAfter(postId, from.createdAt(), from.id(), window);
 
-        boolean hasMore = roots.size() > size;
-        List<Comment> page = hasMore ? roots.subList(0, size) : roots;
-
-        Map<UUID, List<Comment>> childrenOf = new HashMap<>();
-        for (Comment reply : commentRepository.findRepliesForPost(postId)) {
-            childrenOf
-                    .computeIfAbsent(reply.getParent().getId(), key -> new ArrayList<>())
-                    .add(reply);
-        }
-
-        List<CommentResponse> items = page.stream().map(root -> toResponse(root, childrenOf)).toList();
+        boolean hasMore = rows.size() > size;
+        List<Comment> page = hasMore ? rows.subList(0, size) : rows;
+        List<CommentResponse> items = page.stream().map(this::toResponse).toList();
 
         String next = hasMore && !page.isEmpty()
                 ? new PageCursor(page.getLast().getCreatedAt(), page.getLast().getId()).encode()
@@ -193,11 +178,7 @@ public class CommentService {
         return new CommentPage(items, hasMore, next);
     }
 
-    private CommentResponse toResponse(Comment comment, Map<UUID, List<Comment>> childrenOf) {
-        List<CommentResponse> replies = childrenOf.getOrDefault(comment.getId(), List.of()).stream()
-                .map(child -> toResponse(child, childrenOf))
-                .toList();
-
+    private CommentResponse toResponse(Comment comment) {
         Comment parent = comment.getParent();
 
         return new CommentResponse(
@@ -205,9 +186,9 @@ public class CommentService {
                 parent == null ? null : parent.getId(),
                 AuthorView.of(comment.getAuthor()),
                 comment.getBody(),
-                comment.getMedia() == null ? null : "/api/media/" + comment.getMedia().getId(),
+                comment.getMedia() == null ? null : MediaUrls.publicUrl(comment.getMedia().getId()),
                 comment.getCreatedAt(),
-                replies);
+                List.of());
     }
 
     /**

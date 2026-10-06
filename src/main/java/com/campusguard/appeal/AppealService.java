@@ -40,7 +40,7 @@ public class AppealService {
     @Transactional(readOnly=true)
     public List<AppealView> mine(UUID userId,int size){return appeals.findByAppellantIdOrderByCreatedAtDesc(userId,PageRequest.of(0,size)).stream().map(AppealView::of).toList();}
     @Transactional(readOnly=true)
-    public List<AppealView> list(AppealStatus status,int size){return appeals.findByStatusOrderByCreatedAtAsc(status,PageRequest.of(0,size)).stream().map(AppealView::of).toList();}
+    public List<AppealView> list(AppealStatus status,int size,int page){return appeals.findByStatusOrderByCreatedAtAsc(status,PageRequest.of(page,size)).stream().map(AppealView::of).toList();}
     @Transactional
     public AppealView decide(UUID adminId,UUID appealId,AppealDecisionRequest request){
         User admin=users.findById(adminId).orElseThrow(() -> new NotFoundException("No user with id "+adminId));

@@ -3,14 +3,19 @@
 
 # De-Moderation 后端项目报告
 
-> 更新时间：2026 年 9 月 13 日
-> 仓库：`De-moderation-backend`
-> 分支：`main`
-> 报告范围：后端、数据库、AI 审核、管理员网页、测试、部署和运维
+> 更新时间：2026 年 10 月 3 日
+> 仓库：`De-moderation`
+> 分支：`codex/moderation-hardening`（改动未提交）
+> 报告范围：后端、数据库、AI 审核、管理员网页、核心测试和面试演示
+
+## Northflank 迁移验收（2026-10-05）
+
+当前演示沿用原 Neon 数据库和 R2 桶。新 API 已验证真实成员和管理员登录、11 条 ANU 帖子、Gemini 建议、人工复核与审计；Pages 已重新部署，Android 模拟器中两个账号均登录并加载了 11 条真实帖子。迁移证据与热请求延迟限制见[部署说明](../deploy/northflank/README.md)。
+
 
 ## 1. Project Overview
 
-De-Moderation 是校园论坛 `De-discussion` 的后端和内容审核系统。普通成员通过 Android 客户端注册、发帖、评论、上传图片、举报内容和提交申诉；管理员通过独立网页处理审核案件、修改裁决并回复申诉。
+De-Moderation 是校园论坛 `De-discussion` 的后端和内容审核系统。Android 客户端使用真实服务器成员账号，提供注册、登录、发帖、评论、图片、举报和申诉界面。Member 演示账号为 `1234` / `1234`；Admin 模式需登录真实服务器管理员账号，可在 App 或独立网页处理审核案件、模型建议、审计、裁决与申诉。
 
 项目的核心原则是：**AI 负责初步分类，人负责最终决定。**
 
@@ -22,22 +27,15 @@ De-Moderation 是校园论坛 `De-discussion` 的后端和内容审核系统。�
 
 审核员还可以在裁决前，让一个可选的只读助手去查作者的历史处理记录和同规则先例（见 6.3）。它只给建议、不做决定，默认关闭，目前还没有部署到公开演示环境。
 
-目前项目已经具备完整的演示链路：Cloudflare Pages 管理网页调用 Render 后端，后端连接 Neon PostgreSQL，并在可用时调用 Gemini。账号、帖子、评论、举报、审核、申诉、通知和管理员操作都已经落到真实数据库中，不是前端假数据。
+目前项目已经具备完整的演示链路：Cloudflare Pages 管理网页调用 Northflank 后端，后端连接 Neon PostgreSQL，并在可用时调用 Gemini。账号、帖子、评论、举报、审核、申诉、通知和管理员操作都已经落到真实数据库中，不是前端假数据。
 
 当前公开地址：
 
 - 管理员网页：`https://de-moderation-review-demo.pages.dev`
-- 备用网页：`https://de-moderation-review-demo.x2337445.chatgpt.site`
-- 后端 API：`https://de-moderation-api-demo.onrender.com`
-- 健康检查：`https://de-moderation-api-demo.onrender.com/actuator/health/readiness`
+- 后端 API：`https://p01--de-moderation-api--z48dx52bgz5k.code.run`
+- 健康检查：`https://p01--de-moderation-api--z48dx52bgz5k.code.run/actuator/health/readiness`
 
-这套环境适合面试演示和接口联调，但还不是长期无人值守的正式生产环境。之前缺的部分——S3 兼容的媒体存储、Alertmanager 告警投递、可选的异地备份副本、恢复演练和混合负载压测——现在仓库里都有了，但演示环境还一样都没用上：它仍然需要一个存储桶、SMTP 凭据和告警收件箱，以及不休眠的实例和真实的 Kubernetes 集群参数。
-
-其中三项在 2026 年 9 月 13 日被实际演练过。这个说法比"已部署"弱，比"已写好"强：
-
-- **恢复演练：已跑，通过。** `scripts/restore-drill.sh` 把一份真实 dump 恢复进一次性容器，校验和、Flyway V9、七张核心表、59 个约束，以及"每个案件都还留着开启它的举报"这条引用完整性检查，全部通过。这份 dump 来自开发库而非生产库，所以它证明的是演练脚本本身可用、且这个 schema 的 dump 能干净恢复。
-- **`MEDIA_BACKEND=S3`：端到端彩排过，尚未上线。** 用部署时同一套环境变量名，把打好的 jar 指向本地 MinIO 启动。经 `POST /api/media` 上传的图片落在了配置的桶和前缀下；重启进程后，同一个请求返回的字节完全相同。同一个 jar 切回 `FILESYSTEM`、再把那个目录删掉（即一次容器重建），对一张数据库行仍在的图片返回 404——这正是这层抽象要终结的故障。现在只差一个真实的桶和它的凭据。
-- **告警投递：渲染已验证，投递未验证。** 六个变量未设置时 `scripts/render-alertmanager.sh` 干净地拒绝；给了值之后，它渲染出的配置能通过 Alertmanager 自带的 `amtool` 校验，权限 600。但没有任何一条告警真的送达过任何人，因为没有 SMTP 账号。这次彩排发现并修掉了一个真实缺陷：值只为 `sed` 做了转义，没有为它最终落进的那个 YAML 字符串做转义，于是含反斜杠或引号的 SMTP 密码会被一个既不提密码也不提变量名的 YAML 报错挡下。
+本项目按简历与面试演示维护。真实 Gemini 调用、S3 媒体持久化、V13 迁移、评论分页和管理端会话已验证。独立云监控、Resend 接入、定时备份/桶复制框架、Kubernetes 和告警部署配置已精简移除；这些不作为项目完成的前置条件。保留基本健康检查、日志、CI 和按需执行的手动备份/恢复。最新部署步骤见 [演示部署指南](production-runbook.md)。
 
 ## 2. System Architecture
 
@@ -48,9 +46,9 @@ De-Moderation 是校园论坛 `De-discussion` 的后端和内容审核系统。�
 | AI moderation | Gemini、Spring AI、Resilience4j | 语义审核建议、重试、断路和降级 |
 | Rule engine | `keyword-v1` | 确定性基线和无外部依赖兜底 |
 | Admin web | React 19、Next 16 API、vinext | 人工审核、改判和申诉处理 |
-| Client | Android，独立仓库 `De-discussion` | 普通成员论坛交互 |
-| Monitoring | Actuator、Micrometer、Prometheus、Grafana | 健康状态、系统指标和审核指标 |
-| Deployment | Docker、Caddy、Render、Cloudflare Pages | 打包、HTTPS 和公开演示 |
+| Client | Android，独立仓库 `De-discussion` | 论坛交互与真实管理员审核 |
+| Health | Actuator、Micrometer | 基本健康状态和应用指标 |
+| Deployment | Docker、Caddy、Northflank、Cloudflare Pages | 打包、HTTPS 和公开演示 |
 
 ```mermaid
 flowchart LR
@@ -64,8 +62,6 @@ flowchart LR
     Worker --> Keyword[keyword-v1 fallback]
     Worker --> Review[Human review]
     Review --> Audit[(Audit and appeals)]
-    Prometheus --> API
-    Grafana --> Prometheus
 ```
 
 后端使用同一个 PostgreSQL 保存业务数据和审核队列。worker 从数据库领取任务，不依赖单独的内存队列，因此服务重启后案件仍然存在。自动分析只产生建议，内容隐藏、删除或封禁必须由管理员确认。
@@ -77,6 +73,8 @@ flowchart LR
 公开注册只能创建 `MEMBER`，不能通过请求字段获取管理员权限。登录成功后返回一小时有效的 JWT access token 和 30 天 refresh token。refresh token 每次使用都会轮换，数据库只保存 SHA-256 摘要，旧 token 不能重放。
 
 系统支持改密码、退出全部设备和一次性密码重置。改密码或退出全部设备会增加 `tokenVersion`，让已有 access token 立即失效。密码使用 BCrypt 保存；管理员由启动配置在账号不存在时创建，不会把已有同名成员自动提升为管理员。
+
+密码重置 API 和一次性令牌已实现，但演示关闭邮件发送，无法通过邮件完成找回密码。
 
 ### 3.2 Forum
 
@@ -94,7 +92,7 @@ feed 使用 `(created_at, id)` keyset cursor，而不是 offset。新帖子插�
 
 媒体接口只接受 JPEG 和 PNG，默认限制 8 MiB 和 2,000 万像素。服务会识别真实格式、读取尺寸、完整解码并重新编码，避免伪装文件、像素炸弹和原始元数据泄露。
 
-只有上传者能把图片挂到自己的帖子或评论上。公开下载只允许读取仍被可见内容引用的图片，未发布图片和隐藏内容的图片不能通过猜 UUID 直接访问。图片存在哪里是部署配置，由同一个存储接口决定：本地目录，或任何 S3 兼容的存储桶（AWS S3、Cloudflare R2，或互操作模式下的 GCS）。公开演示环境仍然写 Render 本地目录，重建后会丢失，所以需要设置 `MEDIA_BACKEND=S3`。可选的每小时孤儿扫描会删除超过一天、没有任何帖子或评论引用的图片，但绝不动被隐藏或删除内容所用的图片，因为这些裁决可以撤销。
+只有上传者能把图片挂到自己的帖子或评论上。公开下载只允许读取仍被可见内容引用的图片，未发布图片和隐藏内容的图片不能通过猜 UUID 直接访问。图片存在哪里是部署配置，由同一个存储接口决定：本地目录，或任何 S3 兼容的存储桶（AWS S3、Cloudflare R2，或互操作模式下的 GCS）。公开演示环境已使用 `MEDIA_BACKEND=S3`，图片持久化到私有 Cloudflare R2 桶，不依赖 Render 临时目录。可选的每小时孤儿扫描会删除超过一天、没有任何帖子或评论引用的图片，但绝不动被隐藏或删除内容所用的图片，因为这些裁决可以撤销。
 
 ## 4. Moderation Workflow
 
@@ -184,12 +182,12 @@ Gemini 引擎以“模型名/提示词版本”注册，例如 `gemini-3.5-flash
 
 | Guarantee | How it is enforced |
 |---|---|
-| 不能修改任何数据 | 每次查询都在只读事务里执行；隐藏内容或封禁账号仍然只有 `AdminModerationService.decide` 一条路径 |
+| 查询工具不能改变裁决或内容 | 每次查询都在只读事务里执行；隐藏内容或封禁账号仍然只有 `AdminModerationService.decide` 一条路径 |
 | 不能被指向别的案件 | 被调查的案件由循环传给每个工具，模型的参数里从不指定它 |
-| 不能无限花钱 | 每位审核员每小时最多发起 60 次调查；已存储的简报免费返回，被拒绝的请求不计次数 |
+| 调用成本有上界 | 每位审核员每小时最多发起 60 次调查；已存储的简报免费返回，被拒绝的请求不计次数 |
 | 可审计 | 简报写入审计日志并记在发起调查的管理员名下；每次模型调用以 `investigator/<prompt 版本>` 记入 `ai_invocations` |
 
-在 16 个场景上、每个场景跑三次（`gemini-3.5-flash-lite`，prompt `inv-v4`）测得：0.875 的建议是审核员能够辩护的，0.938 的场景三次答案完全一致，0.813 的简报引用了案件真正取决的证据；每次调查约 2,100 个 prompt token、约一次查询，大约是一次审核判定 token 用量的 3.6 倍。有两个失败可以稳定复现，如实记录而没有打补丁：它不会率先建议封禁；即使驳回率显示应当相反，它仍会被先例带偏。设计、prompt 版本历史和测量细节见 [investigation.md](investigation.md)。
+历史实验在 16 个场景上、每个场景跑三次（`gemini-3.5-flash-lite`，prompt `inv-v4`）测得：0.875 的建议是审核员能够辩护的，0.938 的场景三次答案完全一致，0.813 的简报引用了案件真正取决的证据；每次调查约 2,100 个 prompt token、约一次查询，大约是一次审核判定 token 用量的 3.6 倍。有两个失败可以稳定复现，如实记录而没有打补丁：它不会率先建议封禁；即使驳回率显示应当相反，它仍会被先例带偏。设计、prompt 版本历史和测量细节见 [investigation.md](investigation.md)。
 
 ## 7. Evaluation
 
@@ -244,7 +242,7 @@ v1 的 ESCALATE 失败在五周后新写的数据上复现了（0.056 → 0.067�
 
 JWT 密钥没有默认值且至少 32 字节，没有配置时程序直接启动失败。每次认证都会重新读取用户，因此账号被封禁、管理员被降级或执行“退出所有设备”后，旧 JWT 不需要等到自然过期才失效。
 
-生产 profile 关闭 Swagger；Prometheus 只应在内部观测网络访问；健康概要可以公开，但详细组件信息需要管理员权限。管理员网页把 token 放在 `sessionStorage`，关闭浏览器会话后消失。
+生产 profile 关闭 Swagger；当前演示默认不暴露 Prometheus；健康概要可以公开，但详细组件信息需要管理员权限。管理员网页把 token 放在 `sessionStorage`，关闭浏览器会话后消失。
 
 ## 9. Admin Review and Appeals
 
@@ -276,28 +274,25 @@ JWT 密钥没有默认值且至少 32 字节，没有配置时程序直接启动
 | AI failure handling | 超时、429、断路器、错误输出、纠正重试和降级 |
 | Appeals and notifications | 申诉权限、撤销、状态恢复和通知 |
 | Media | 格式、像素、重新编码、归属和访问控制 |
-| Media storage | 两个存储后端必须同样满足的一份共享契约，分别对本地目录、真实 S3 服务运行，以及——在 `.env` 的 S3 段填好时——对部署自己的存储桶运行 |
+| Media storage | 两个存储后端必须同样满足的一份共享契约，分别对本地目录、S3Mock 运行，以及——在 `.env` 的 S3 段填好时——对部署自己的存储桶运行 |
 | Media sweep | 孤儿扫描会删除什么，以及——真正要紧的断言——它拒绝删除什么 |
 | Case investigation | 工具白名单、只读事务、步数预算、引用校验、共享熔断、端点权限与限流，以及工具调用适配器本身 |
 | Evaluation harness | 成对评分、多次运行离散度、答案不稳定，以及留出集自身的不变量 |
-| Database and API policy | Flyway V1–V9、Actuator、Swagger、N+1 查询数量 |
+| Database and API policy | Flyway V1–V13、Actuator、Swagger、N+1 查询数量 |
 
-S3 后端通过 Testcontainers 对 MinIO 测试，而不是对桩对象。它可能"对替身通过、实际却错"的三处都是协议行为：删除不存在的 key 会成功，head 不存在的 key 会抛 `NoSuchKey`，列举按字典序返回。手写的替身只会附和实现碰巧的做法。
+当前 S3 后端通过 Testcontainers 对 S3Mock 测试，验证上传、读取、删除和列举等契约；它不能证明部署所用服务商对 region 和 path-style 寻址的兼容性。配置 `MEDIA_S3_BUCKET` 后，真实桶契约测试会对部署自己的存储桶运行。当前测试使用 `adobe/s3mock:4.7.0`，公开演示使用 R2；模拟服务与真实桶是两个验证层次。
 
 留出集本身也在测试之下。它是没有其他东西会去碰的产物——手工编辑，又是每个公开数字的分母；如果某组两半标签相同，或者某条样本是从调参用的数据集里抄来的，它就会悄无声息地出错。`HeldOutDatasetTest` 断言这些性质，而不是靠信任。
 
-2026 年 9 月 13 日本地验证结果：
+2026 年 10 月 3 日精简后验证（只列有对应证据的结果）：
 
-- Maven 测试：运行 358 个，0 失败，0 错误，跳过 2 个（需要真实模型 Key 的两组）
-- PostgreSQL：16，通过 Testcontainers
-- MinIO：`RELEASE.2024-08-29`，通过 Testcontainers
-- Flyway：V1–V9 全部验证并执行
-- 管理网页：lint、类型检查和 production build 通过
-- 后端：Docker 镜像构建通过
-- 审核台：对本地后端渲染已存储的简报，每个引用都能打开对应案件并返回
-- 恢复演练：真实 dump 通过，损坏副本按预期失败
-- 负载：`k6-mixed.js` 对本地构建守住了所有预算（见第 11 节）
-- GitHub Actions：`main` 上最近一次通过是 2026 年 8 月 25 日；本次改动推送后才会运行
+- 针对性测试：23 项，0 失败、0 错误、0 跳过；覆盖认证、会话、一次性令牌、评论边界和生产监控配置。
+- 数据库：目标演示已迁移至 V13；本地集成测试使用 PostgreSQL 16，目标 Neon 使用 PostgreSQL 18。
+- Compose：配置解析通过，只包含 PostgreSQL、后端、管理网页和 Caddy 四项服务。
+- 线上检查：readiness 返回 HTTP 200 / `UP`，管理网页 HTTP 200，Gemini v2 为活动引擎；匿名 Prometheus 请求被拒绝。
+- 验证记录：本机私有 `backups/project-simplification-20261003.validation.json`，不包含凭据。
+
+这 23 项不是全量测试数，也不表示本次重新执行了真实模型、存储桶或全量压测。GitHub Actions 配置保留；当前改动未提交、未推送，不能表述为本次云端 CI 已通过。
 
 ## 11. Deployment and Operations
 
@@ -307,7 +302,7 @@ S3 后端通过 Testcontainers 对 MinIO 测试，而不是对桩对象。它可
 Cloudflare Pages
         |
         v
-Render Spring Boot API
+Northflank Spring Boot API
         |
         v
 Neon PostgreSQL
@@ -318,27 +313,19 @@ Neon PostgreSQL
 | Layer | Current status |
 |---|---|
 | Admin web | Cloudflare Pages HTTPS，公开可访问 |
-| Backend | Render Docker service，readiness 为 `UP` |
-| Database | Neon 托管 PostgreSQL，已执行 V1–V8；V9 随下次部署上线 |
+| Backend | Northflank 免费 Docker 实例，readiness 为 `UP` |
+| Database | Neon 托管 PostgreSQL，已迁移至 V13 |
 | AI | Gemini v2 正常，`keyword-v1` 兜底 |
 | Secrets | 本地 `.env` 被 Git 忽略；云端使用平台环境变量 |
 | CI | 后端 verify、Docker build、网页 lint/build |
 
-仓库还提供单机生产 Compose、Caddy HTTPS、Prometheus、Alertmanager、Grafana datasource、告警规则、数据库与媒体备份/恢复脚本、恢复演练，以及 Kubernetes 模板。
-
-其中三处缺口已经补上，但"补上"对每一项的含义不同，需要说清楚：
-
-**告警投递。** 之前告警规则由 Prometheus 计算，却没有投递给任何人：既没有 `alerting` 配置，也没有 Alertmanager。现在两者都有了，带按严重级别的路由，以及一条抑制规则，让一次宕机只发一封邮件而不是三封；另有一个渲染步骤——Alertmanager 是这里唯一不在自身配置中展开环境变量的组件，所以由 `scripts/render-alertmanager.sh` 填充模板，任何变量未设置就拒绝写文件，并用 `amtool` 校验结果。已经验证的是渲染后的配置能被 Alertmanager 自带工具接受；尚未验证的是真实 SMTP 账号能把邮件送进真实收件箱，因为还没有这样的账号。
-
-**异地备份。** `scripts/backup.sh` 支持可选的 `OFFSITE_BUCKET`，会把每份数据库 dump、媒体归档和校验和复制到 S3 兼容存储桶，再回读 dump 证明确实写到了——上传报告成功却什么也没存下，正是让人误以为自己有备份的那种失败。同样因为没有真实存储桶，这一项尚未验证。
+仓库提供简化的四服务 Compose、Caddy HTTPS、手动备份/恢复脚本和 CI。
 
 **恢复。** 这一项已经验证。`scripts/restore-drill.sh` 把 dump 恢复到一个临时 PostgreSQL 容器里，检查校验和、Flyway 历史、核心表、约束数量和一条引用完整性不变量。对本项目数据库的真实 dump 执行时全部通过；对故意损坏的副本执行时报出失败并以非零状态退出——只会通过的检查不算检查。2026 年 9 月 13 日重跑结果相同：真实 dump 的每项检查都通过，损坏副本报出 14 个失败、退出码为 1。
 
-**负载。** `load/k6-mixed.js` 同时跑六类负载——浏览、登录、发帖、举报、上传和管理员案件列表——每类单独设延迟预算。它在 2026 年 9 月 13 日跑过一次：对象是笔记本上的本地构建，使用关键词引擎，并调高了按账号的限流。三分钟内共 6,359 个请求、每秒约 35 个，没有失败请求，所有检查通过，没有出现 429，所有预算都守住了——p95 分别为浏览 8 ms、发帖 20 ms、举报 72 ms、上传 135 ms、案件列表 49 ms。这说明脚本本身可用、这些路径在混合负载下站得住；但它说明不了容量：数据库、应用和压测工具在同一台机器上，也没有调用模型。
+**负载。** 最新保留的本地 `load/k6-mixed-summary.json` 显示八项阈值中七项通过：p95 为浏览 7 ms、写入 18 ms、举报 22 ms、上传 432 ms、管理员列表 71 ms；浏览与管理员请求失败率为零。登录失败率为 92.3%，主要因每 IP 登录限流；脚本虽单独统计 429，k6 内置失败率仍计入它。因此不能写“所有压测通过”，也不能用这些本地、未调用模型的数据宣称线上容量。压测无需作为面试项目的完成门槛。
 
-真实集群参数仍未提供。
-
-直接打开 API 根地址会返回 401，这是默认拒绝策略的正常结果。给人使用的是管理员网页；服务存活检查使用 readiness 地址。Render 免费实例可能在空闲后休眠，演示前应提前访问健康检查。
+直接打开 API 根地址会返回 401，这是默认拒绝策略的正常结果。给人使用的是管理员网页；服务存活检查使用 readiness 地址。默认后端已迁移到 Northflank 常驻实例，原 Render 保留用于回退。网络、数据库空闲恢复及部署重启仍可能延迟，演示前应检查 readiness。
 
 ## 12. Limitations and Future Work
 
@@ -348,15 +335,11 @@ Neon PostgreSQL
 | Investigation | 不会率先建议封禁；即使驳回率显示应当相反，仍会被先例带偏 | 已裁决案件足够多之后，对它们做相似检索 |
 | Investigation measurement | 场景集已扩到 32 个，但还没有任何一次真实模型运行跑完：当天额度在跑完两个场景后耗尽。共识模式（`INVESTIGATOR_RUNS=3`）已实现、已单测，仍因同一原因未测。§6.3 引用的数字来自 16 个场景的那次运行，现在已无法复现——场景集不同，而且当时的 grounding 计数偏低 | 在新额度上跑 32 个场景（约 98 次调用），再跑共识模式（约 294 次），日上限 500 次 |
 | Evaluation variance | 192 条数据集的表格仍是单次运行；留出集上 keyword-v1、v1、v2、v3 都已各跑三次，但 v1 与 v3 分属不同场次 | 192 条数据集补跑三次；四个引擎同场跑完需要不止一天的免费额度 |
-| Demo configuration | 公开演示仍运行 8 月的版本：本地目录存图、没有告警接收端、没有调查助手 | 用 `MEDIA_BACKEND=S3` 和渲染好的 Alertmanager 配置部署当前版本，需要时再设 `INVESTIGATOR_ENABLED=true` |
-| Production infrastructure | 免费实例会休眠，平台域名不自有。Kubernetes 清单不再是未经验证的了——十个资源全部被真实的 v1.37 API server 接受——但还从未由它跑起过任何 Pod，镜像地址和主机名仍是占位符 | 使用不休眠实例、自有域名、Secret Manager 和真实集群参数 |
-| Alert delivery | 已对本地 SMTP 捕获服务器端到端验证：warning 进了 operators 地址，critical 进了 on-call 地址，且一条 firing 的 `CampusGuardBackendDown` 抑制了同 job 的 warning。从未经过真实服务商，所以 SMTP 认证、与服务商的 TLS 协商和外网可达性仍未验证 | 提供 `ALERT_SMTP_*`，确认一封告警真正到达邮箱 |
-| Off-site backup | 从未验证。媒体存储桶现在验证过了，但 `OFFSITE_*` 未设置，所以从未有任何副本被写到异地 | 提供 `OFFSITE_*`，确认一次副本及其校验和 |
-| Comment fan-out | 顶层评论已分页，但单个根评论的回复树仍可能很宽 | 在线程内对回复分页 |
+| Demo configuration | Network, idle database resume and deployment restarts can add latency | Northflank is the default; check readiness, retain Render for rollback |
 | Media atomicity | 图片字节和数据库记录分两步写入，无法放进同一个事务 | 已有边界：补偿逻辑处理常规失败，孤儿扫描处理两步之间进程崩溃的情况 |
 | Load coverage | 混合负载脚本的八个阈值中有七个在本地进程上通过：browse p95 7 ms、write 18 ms、report 22 ms、admin 71 ms、upload 432 ms，admin 与 browse 零失败请求。第八个按现在的写法不可能通过——`sign-in` 要求失败率低于 1%，而应用自身每 IP 每 15 分钟 30 次登录的上限，在脚本每秒两次请求下保证了约 92% 的失败率 | 决定 429 对这个负载算不算失败（它是限流器在按设计工作），或者把该负载压到上限以下；然后对真正部署的一套栈跑，而不是本地进程 |
 
-自上一版以来已补上：媒体持久化（存储接口背后的 S3 兼容后端，加孤儿扫描）、告警投递（按严重级路由的 Alertmanager）、异地备份（可选、回读校验的副本）、恢复信心（一个实际跑过、并且遇到损坏 dump 会失败的演练）、负载覆盖（六类负载、每类单独延迟预算的 k6 脚本，已在本地跑过，尚未在预发布环境跑），以及已弃用的 GitHub Actions 版本。
+当前保留的工程重点是媒体持久化、评论分页、令牌会话、核心集成测试和真实模型验证。
 
 ---
 
@@ -376,7 +359,7 @@ Neon PostgreSQL
 | Moderation cases | list、detail、decision、assignment | 仅管理员 |
 | Case investigation | `GET /api/admin/moderation-cases/{id}/investigation`、`POST /api/admin/moderation-cases/{id}/investigate` | 仅管理员；POST 按审核员限流，案件不在待审核状态时返回 409，助手关闭时返回 503 |
 | Moderation status | `/api/moderation/status` | 公开，只返回能力状态 |
-| Operations | health、metrics、prometheus | 健康概要公开；详细信息按管理员或内网限制 |
+| Operations | health、metrics | 健康概要公开；详细信息需管理员权限；演示默认关闭 Prometheus 暴露 |
 
 本地开发可使用 `/swagger-ui.html` 和 `/v3/api-docs`；正式 profile 关闭这两个入口。
 
@@ -393,14 +376,18 @@ Neon PostgreSQL
 | V7 | `comment.depth` | 限制嵌套深度，防止递归栈溢出 |
 | V8 | production capabilities | 资料、session、reset、限流、媒体、分配、SLA、申诉和通知 |
 | V9 | investigation indexes | 支撑"作者过往裁决"和"同规则先例"两类查询的部分索引 |
+| V10 | content removal provenance | 标记内容是否由案件隐藏，避免申诉恢复作者自行删除的内容 |
+| V11 | case evidence snapshot | 保存举报时文本、作者和图片，防止后续编辑替换证据 |
+| V12 | investigation lease | 在模型调用前占用案件，防止调查重复触发并允许崩溃后过期恢复 |
+| V13 | comment page index | 对帖子全部可见评论和回复的 keyset 分页建立部分索引 |
 
 `reports.target_id` 和 `moderation_cases.target_id` 可以指帖子或评论，无法同时建立两个数据库外键，因此写入时由服务层验证目标。`audit_log.actor_id` 不设用户外键，保证账号删除后审计仍然存在。AI 原始回答和审计 payload 使用 JSONB，以适应不同动作的数据结构。
 
-## Appendix C — Production Configuration
+## Appendix C — Demo Configuration
 
 ### C.1 Runtime configuration
 
-真实密钥只放本机 `.env`、Render 环境变量或后续 Secret Manager，不写入代码和 Git。主要配置包括数据库 URL/账号/密码、JWT 密钥、管理员初始化密码、Grafana 密码、CORS 来源和 Gemini Key；用到时还有媒体存储桶、告警 SMTP 和异地备份凭据。密码重置邮件（`MAIL_*`）和告警邮件（`ALERT_*`）分开配置，演示环境两者都还没有配置。
+真实密钥只放本机 `.env` 或部署平台环境变量，不写入代码和 Git。演示配置包括数据库、JWT、管理员初始化、CORS、Gemini 和媒体存储桶。原有 SMTP 密码重置邮件默认关闭，演示不要求配置。
 
 管理员账号是真实数据库记录。用户名为 `admin`，密码来自 `ADMIN_PASSWORD`，报告和仓库不保存实际密码。初始化只在账号不存在时执行，修改环境变量不会自动改掉数据库中的旧密码。
 
@@ -420,22 +407,18 @@ npm ci
 npm run dev
 ```
 
-本地地址为 `http://localhost:8080` 和 `http://localhost:3000`。`localhost` 只在当前电脑有效，不是面试官访问的公网地址。
+面试演示使用[线上审核工作台](https://de-moderation-review-demo.pages.dev/)与 API `https://p01--de-moderation-api--z48dx52bgz5k.code.run`。本地后端开发地址为 `http://localhost:8080`。
 
 ### C.3 Deployment assets
 
 - `Dockerfile`：Java 21 非 root 后端镜像。
 - `admin-web/Dockerfile`：vinext standalone 管理网页镜像。
-- `docker-compose.prod.yml`：PostgreSQL、后端、管理网页、Caddy、Prometheus、Alertmanager 和 Grafana。
+- `docker-compose.prod.yml`：PostgreSQL、后端、管理网页和 Caddy。
 - `deploy/Caddyfile`：主域名和 API 子域名 HTTPS 反向代理。
-- `deploy/observability`：Prometheus、Grafana datasource、告警规则和 Alertmanager 模板。
-- `scripts/backup.sh` / `restore.sh`：数据库、媒体、校验和、可选并回读校验的异地副本，以及显式恢复确认。
-- `scripts/restore-drill.sh`：把最新 dump 恢复到临时容器并检查结果。
-- `scripts/render-alertmanager.sh`：填充 Alertmanager 模板并用 `amtool` 校验。
+- `scripts/backup.sh` / `restore.sh`：手动数据库/文件媒体备份、校验和，以及显式恢复确认。
+- `scripts/restore-drill.sh`：把指定 dump 恢复到临时容器并检查结果。
 - `load/k6-mixed.js`：六类负载、每类单独延迟预算；`load/k6-smoke.js` 保留用于快速只读检查。
-- `deploy/k8s`：Deployment、Service、Ingress、TLS、HPA、PDB、NetworkPolicy 和 PVC 模板。
 
-Kubernetes 模板不能直接用于未知集群。实际应用前需要镜像仓库、不可变 tag、Ingress Controller、cert-manager、Secret Manager、托管 PostgreSQL、监控 namespace 和可用存储类。
 
 ## Appendix D — Development Issues
 
@@ -458,7 +441,6 @@ Kubernetes 模板不能直接用于未知集群。实际应用前需要镜像仓
 | Hikari 时长写成 `5s` | production profile 无法启动 | 改为毫秒整数 `5000/3000` |
 | Docker 预拉全部 Maven 依赖 | 构建慢、缓存膨胀 | 直接 package 并使用 BuildKit cache |
 | 管理网页镜像过大/缺依赖 | 镜像 1.71 GB 或构建后不能运行 | standalone 输出并补最小运行依赖 |
-| Prometheus 没有 receiver | 规则触发但没人收到消息 | 接入按严重级路由的 Alertmanager，配置由模板渲染并用 `amtool` 校验 |
 | Render 应用与管理端口不同 | 健康检查访问不到 | 统一使用平台端口 10000 |
 | Render 免费实例冷启动慢 | 容易误判部署失败 | 等待 readiness，演示前主动唤醒 |
 | API 根地址返回 401 | 被误认为网页打不开 | 区分网页、API 和 readiness；保留默认拒绝 |
@@ -469,7 +451,6 @@ Kubernetes 模板不能直接用于未知集群。实际应用前需要镜像仓
 | Gemini 3 回放函数调用时缺少 thought signature | 调查的第二轮请求被供应商以 400 拒绝 | 把之前的轮次改写成文本叙述；工具声明仍随每次请求发送 |
 | 调查限流在检查案件之前就扣次数 | 审核员点开已解决的案件，会把每小时额度耗在 409 上 | 先检查案件，只有可能真正调用模型的请求才计数 |
 | 缺失的 usage 被记成 0 token | 没有 usage 的响应会被当成免费调用计入平均值 | 两个模型适配器都把 Spring AI 的 `EmptyUsage` 视为未知 |
-| Alertmanager 配置用短语法挂载 | 没渲染的配置会变成一个空目录，容器反复重启 | 改用长语法并设 `create_host_path: false`，让部署直接失败 |
 
 ## Appendix E — Commit and Development History
 
@@ -492,4 +473,4 @@ Kubernetes 模板不能直接用于未知集群。实际应用前需要镜像仓
 
 `render-demo` 原本是部署时生成的单提交快照，没有共同祖先。直接强行合并会产生大量 `add/add` 冲突。最终先提交完整生产化代码，再用内容不变的 merge commit 连接快照历史，因此 README、评测数据和主分支历史都得到保留。
 
-9 月的工作在 `feat/investigation-agent` 分支上进行：先是案件调查助手——按作者和按规则查询历史、只读工具注册表、有界调查循环、prompt 版本 `inv-v1` 到 `inv-v5`、审核台调查面板、裁决语料导出和调查场景集；随后是带多次运行离散度的留出评测集、S3 兼容媒体存储与孤儿扫描、Alertmanager 告警投递、异地备份副本、恢复演练和混合负载 k6 脚本。
+9 月工作包括案件调查助手、只读工具、有界调查循环、prompt 版本、裁决语料导出、留出评测、S3 媒体持久化和混合负载验证。

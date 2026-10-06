@@ -168,13 +168,14 @@ function json(response) {
 }
 
 /**
- * A throttled response is a pass, not a failure.
+ * A throttled response is counted separately and skips the custom check.
  *
  * The rate limiters are a feature: they exist to bound what one account can do
  * to a thread and what one page can cost. A load generator pretending to be one
  * user at 3 writes a second is precisely the traffic they are built to refuse,
- * so counting 429s as errors would make a working limiter look like an outage
- * and make the thresholds untunable.
+ * but k6 still counts HTTP 429 in its built-in http_req_failed metric. The
+ * sign-in failure threshold therefore measures throttling too and can fail
+ * even when the limiter works as designed. No expected-status override is set.
  */
 function ok(response, name, allowed) {
   if (response.status === 429) {

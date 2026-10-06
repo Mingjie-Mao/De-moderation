@@ -6,8 +6,8 @@ import java.util.List;
 import java.util.UUID;
 
 /**
- * A comment together with its replies. The nesting mirrors what a client renders,
- * so the client never has to reassemble a thread from a flat list itself.
+ * A comment with its parent id. List responses are flat and paged; the replies
+ * field remains empty for older clients that already know this response shape.
  */
 public record CommentResponse(
         UUID id,

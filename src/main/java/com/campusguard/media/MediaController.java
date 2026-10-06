@@ -38,7 +38,9 @@ public class MediaController {
         MediaService.StoredMedia stored = service.read(id);
         return ResponseEntity.ok()
                 .contentType(MediaType.parseMediaType(stored.metadata().getContentType()))
-                .cacheControl(CacheControl.maxAge(java.time.Duration.ofDays(30)).cachePublic().immutable())
+                // Visibility can change when a moderator hides the content.
+                // A long-lived public cache would keep serving the image anyway.
+                .cacheControl(CacheControl.noStore())
                 .header(HttpHeaders.CONTENT_DISPOSITION, "inline")
                 .body(stored.bytes());
     }

@@ -13,12 +13,12 @@ docker compose up -d
 set -a && . ./.env && set +a && mvn spring-boot:run
 ```
 
-Create an administrator, since no endpoint grants the role:
-
-```bash
-docker exec -e PGPASSWORD="$DB_PASSWORD" campusguard-postgres \
-  psql -U "$DB_USER" -d "$DB_NAME" -c "update users set role='ADMIN' where username='<your admin>';"
-```
+Set `ADMIN_USERNAME` and `ADMIN_PASSWORD` in the local `.env` before starting
+the backend. Startup creates the admin only if that username does not exist;
+it does not promote an existing member or replace an existing password.
+For an LLM demonstration, configure `AI_CHAT_MODEL`, `GEMINI_API_KEY`,
+`GEMINI_MODELS` and `MODERATION_ENGINE` too. Never record real credentials.
+For the public demo, open readiness ahead of time to allow for a cold start.
 
 Have open: Swagger UI, and a terminal on the application log.
 Also start `admin-web` with `npm run dev` and open `http://localhost:3000` for
@@ -47,7 +47,7 @@ curl -s 'localhost:8080/api/posts?forum=anu-general&size=5'
 ```
 
 Say: the feed pages by cursor rather than offset, so a post arriving mid-scroll
-does not shift the list and a reader never sees the same post twice.
+does not shift the list and pagination does not repeat a row because a new post was inserted.
 
 ## 2 — Report it (20s)
 
@@ -102,8 +102,10 @@ Read the feed once more. The post is gone.
 
 ## 6 — Pull the plug (30s)
 
-Stop the application, remove `AI_CHAT_MODEL` from `.env`, start it again. Report
-something else and let it run.
+On a local throwaway demo only, stop the application, remove `AI_CHAT_MODEL`
+and select `MODERATION_ENGINE=keyword-v1`, then start it again. Report another
+item. During an interview on the public deployment, show the degradation
+test results instead of changing the live service.
 
 The case still reaches a verdict, and the engine on it reads `keyword-v1`. Say:
 a missing key degrades moderation to rules; it does not stop it. There are
@@ -125,9 +127,9 @@ is the floor, and it is why the baseline was measured before there was anything
 to compare it to.
 
 Then the two model rows, which are the more interesting result. Same code, same
-model, two prompt versions: macro-F1 0.636 and 0.924. The difference is entirely
-one class — the first prompt answered ALLOW to thirty-three of the thirty-six
-samples that should have reached a person, because it was answering "does this
+model, two prompt versions: macro-F1 0.617 and 0.924 in the stored report. The difference is entirely
+one class — the first prompt recalled only two of the thirty-six
+`ESCALATE` samples, because it was answering "does this
 break a rule" when the queue is asking "can this be closed without a person".
 
 Close on the limits, and do not wait to be asked: the violating half of the

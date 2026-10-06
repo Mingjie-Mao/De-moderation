@@ -46,7 +46,7 @@ public class CommentController {
     }
 
     @GetMapping
-    @Operation(summary = "Read a thread, paged by top-level comment")
+    @Operation(summary = "Read a bounded page of comments and replies in creation order")
     public CommentPage thread(
             @PathVariable UUID postId,
             @Parameter(description = "nextCursor from the previous page; omit for the first")

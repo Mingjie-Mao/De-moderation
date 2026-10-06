@@ -24,13 +24,16 @@ resolve cases and ban other people.
 `AccountStateFilter` re-reads the account on every authenticated request.
 Suspended or deleted is rejected; authorities are rebuilt from the stored role
 rather than from the claim, so a promotion is picked up on a token the user
-already holds. One primary-key lookup per request buys it. A revocation list or
-refresh tokens would both be more machinery than a forum this size justifies.
+already holds. One primary-key lookup per request buys it. A separate access-token revocation list is unnecessary here: the stored
+account state and token version govern access; rotating refresh tokens support
+session renewal.
 
 The same check now includes `tokenVersion`. Password change, logout-all and
 security administration increment it, invalidating every older access token on
-its next request. A normal logout deletes the current refresh-token family;
-refresh tokens rotate on every use and are stored only as SHA-256 digests. This
+its next request. The API exposes logout-all for server-side revocation. The admin console's
+ordinary logout clears its local session; it has no per-session revocation
+endpoint. Refresh tokens rotate on every use and are stored only as SHA-256
+digests. This
 keeps short-lived access tokens convenient without making a stolen long-lived
 refresh token reusable forever.
 
@@ -97,8 +100,9 @@ do not depend on public API documentation.
 
 ## Privilege is not granted over the API
 
-No endpoint promotes anyone to administrator. The role is set directly in the
-database. An API that hands out privilege on request hands it to whoever asks.
+No endpoint promotes anyone to administrator. The startup bootstrap creates a new administrator from configured
+credentials only if that username does not already exist. Existing members are
+never promoted automatically. An API that hands out privilege on request hands it to whoever asks.
 
 ## The rest, briefly
 
@@ -115,13 +119,19 @@ database. An API that hands out privilege on request hands it to whoever asks.
   cookie sessions would mean reinstating it.
 - **CORS is explicit.** Only configured browser origins can call the API; bearer
   tokens are not cookies and credentialed cross-origin requests are disabled.
-- **Reviewer credentials stay out of Android.** The member app has no online
-  reviewer login or admin API calls. Privileged sessions exist only in the
-  browser console's session storage and disappear when that tab session ends.
+- **Administrator login is verified by the server.** Android Admin selection
+  requires real credentials and an active `ADMIN` profile; the local role flag
+  is not authority. Android never saves administrator passwords or tokens to
+  preferences. Tokens live in process memory and are bound to one API origin;
+  restarting the process requires login again. A 401 permits one rotating
+  refresh, a 403 ends the privileged session, and transient failures preserve
+  it for retry. The browser keeps its existing session-scoped token storage.
+  Private media uses authenticated case-scoped paths without redirects.
 - **Uploaded media is decoded and rewritten.** JPEG/PNG content is bounded by
   bytes and decoded pixels, metadata is stripped, ownership is checked before an
   attachment is referenced, and public reads are allowed only for media attached
-  to visible content.
+  to visible content. Public reads use `no-store` because visibility can change.
+  Frozen case attachments have a separate administrator-only, case-scoped URL.
 - **Passwords are BCrypt.** Deliberately slow and salted per password by
   construction, so a leaked table cannot be attacked with precomputed hashes.
 - **Authorization is by route prefix, not per method.** `/api/admin/**` is

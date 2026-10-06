@@ -4,7 +4,10 @@ spring:
     username: ${DB_USER:campusguard}
     password: ${DB_PASSWORD}
     hikari:
-      maximum-pool-size: ${DB_POOL_SIZE:20}
+      maximum-pool-size: ${DB_POOL_SIZE:5}
+      minimum-idle: ${DB_MIN_IDLE:0}
+      idle-timeout: 600000
+      keepalive-time: ${DB_KEEPALIVE_MS:0}
       # HikariConfig exposes these two values as millisecond longs rather than
       # Spring Duration properties.
       connection-timeout: 5000
@@ -33,7 +36,7 @@ campusguard:
     expose-api-docs: false
     # Port 9090 is restricted to the internal observability network in the
     # supplied deployment. Never publish it from the reverse proxy.
-    expose-prometheus: true
+    expose-prometheus: ${EXPOSE_PROMETHEUS:true}
   media:
     # Still the filesystem by default, because a deployment with a real mounted
     # volume is a correct use of it and changing the default would break those.
@@ -47,7 +50,7 @@ campusguard:
     sweep:
       enabled: ${MEDIA_SWEEP_ENABLED:true}
   mail:
-    enabled: ${MAIL_ENABLED:true}
+    enabled: ${MAIL_ENABLED:false}
 
 management:
   server:

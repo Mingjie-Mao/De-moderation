@@ -1,6 +1,7 @@
 package com.campusguard.moderation.investigation;
 
 import com.campusguard.auth.RequestRateLimiter;
+import com.campusguard.common.ConflictException;
 import com.campusguard.moderation.ModerationCaseRepository;
 import java.time.Duration;
 import java.time.Instant;
@@ -45,18 +46,21 @@ public class InvestigationService {
     private final InvestigatorProperties properties;
     private final RequestRateLimiter rateLimiter;
     private final ModerationCaseRepository cases;
+    private final InvestigationLease lease;
 
     public InvestigationService(
             ObjectProvider<Investigator> investigator,
             InvestigationRecorder recorder,
             InvestigatorProperties properties,
             RequestRateLimiter rateLimiter,
-            ModerationCaseRepository cases) {
+            ModerationCaseRepository cases,
+            InvestigationLease lease) {
         this.investigator = investigator;
         this.recorder = recorder;
         this.properties = properties;
         this.rateLimiter = rateLimiter;
         this.cases = cases;
+        this.lease = lease;
     }
 
     public Optional<InvestigationBriefView> existingBrief(UUID caseId) {
@@ -84,23 +88,43 @@ public class InvestigationService {
         // a model.
         CaseInvestigator.requireAwaitingReview(cases, caseId);
 
-        // Counted after the cache check and before the call, so returning a brief
-        // somebody already paid for is free and only a real model call is
-        // charged. Counted per reviewer rather than per case: a case is capped at
-        // one investigation anyway unless it is forced, and forcing is exactly
-        // the path worth bounding.
-        rateLimiter.consume(
-                "investigate-admin",
-                String.valueOf(adminId),
-                properties.perReviewerPerHour(),
-                Duration.ofHours(1),
-                "You have started %d investigations in the last hour, which is the limit. Each one calls a model."
-                        .formatted(properties.perReviewerPerHour()));
+        UUID owner = UUID.randomUUID();
+        if (!lease.acquire(caseId, owner)) {
+            // Another reviewer might have finished between our first cache
+            // check and reservation attempt. Serve that brief if it exists.
+            if (!force) {
+                Optional<InvestigationBriefView> completed = recorder.existing(caseId);
+                if (completed.isPresent()) return completed.get();
+            }
+            throw new ConflictException("An investigation is already in progress for this case.");
+        }
 
-        InvestigationBriefView view = InvestigationBriefView.of(
-                loop.investigate(caseId), properties.promptVersion(), Instant.now());
+        try {
+            // A first caller may have finished just before this reservation
+            // was acquired. Do not charge or call the model again.
+            if (!force) {
+                Optional<InvestigationBriefView> completed = recorder.existing(caseId);
+                if (completed.isPresent()) return completed.get();
+            }
 
-        recorder.record(adminId, caseId, view);
-        return view;
+            // Counted after the cache check and before the call, so returning a
+            // brief somebody already paid for is free. Counted per reviewer:
+            // forcing a new investigation is exactly the path worth bounding.
+            rateLimiter.consume(
+                    "investigate-admin",
+                    String.valueOf(adminId),
+                    properties.perReviewerPerHour(),
+                    Duration.ofHours(1),
+                    "You have started %d investigations in the last hour, which is the limit. Each one calls a model."
+                            .formatted(properties.perReviewerPerHour()));
+
+            InvestigationBriefView view = InvestigationBriefView.of(
+                    loop.investigate(caseId), properties.promptVersion(), Instant.now());
+
+            recorder.record(adminId, caseId, view);
+            return view;
+        } finally {
+            lease.release(caseId, owner);
+        }
     }
 }

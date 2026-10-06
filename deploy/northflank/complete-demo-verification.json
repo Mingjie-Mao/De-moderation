@@ -1,0 +1,80 @@
+{
+  "verifiedOn": "2026-10-06",
+  "api": {
+    "base": "https://p01--de-moderation-api--z48dx52bgz5k.code.run",
+    "auth_roles_verified": [
+      "MEMBER",
+      "ADMIN"
+    ],
+    "generated_member_login": true,
+    "imported_trader_login": true,
+    "visible_posts": 47,
+    "own_posts": 3,
+    "own_comments": 16,
+    "liked": 9,
+    "saved": 8,
+    "following": 3,
+    "followers": 10,
+    "alerts": 4,
+    "market_quotes": 4,
+    "imported_candles": 24,
+    "original_traders": 8,
+    "trader_history_entries": 18,
+    "server_comment_counts": true,
+    "admin_api_available": true
+  },
+  "originalContent": {
+    "users": 11,
+    "posts_verified": 47,
+    "comments_verified": 108,
+    "images_verified": 6,
+    "content_authors_parents_match": true
+  },
+  "databaseCounts": {
+    "accounts": 66,
+    "postsIncludingSoftDeleted": 50,
+    "commentsIncludingSoftDeleted": 115,
+    "postVotes": 1041,
+    "commentVotes": 1018,
+    "follows": 13,
+    "bookmarks": 9,
+    "wallets": 10,
+    "trades": 84,
+    "candles": 80,
+    "notifications": 11
+  },
+  "originalScoresMatchRealVoteRows": true,
+  "marketWalletsAndLedgersVerified": 8,
+  "marketLedgerContinuity": true,
+  "repeatImportSkipped": true,
+  "schemaVersion": "15",
+  "fixtureProvenance": "Original interview sample identities and virtual market history; not organic users or financial performance",
+  "tests": {
+    "backendFocused": 28,
+    "androidUnit": 59,
+    "androidDevice": 12
+  },
+  "image": "ghcr.io/mingjie-mao/de-moderation-backend@sha256:c43500ead249d5878673fd313c96b7873a628a9946b2896e83888f7b6dfcbaaa",
+  "uiVerified": [
+    "Feed with media and database comment count",
+    "You posts and profile relations",
+    "You comments without prior visits",
+    "Market wallet and chart",
+    "Original leaderboard participants",
+    "Server notifications with real social types"
+  ],
+  "health": {
+    "startup": "passing",
+    "readiness": "passing",
+    "liveness": "passing",
+    "restarts": 0
+  },
+  "finalApk": {
+    "sha256": "21a58f5b782535888f8f2ff0a953b8b28a51527a892da55105f707bdc2eac6ee",
+    "installedDevices": [
+      "Medium_Phone (API 33, isolated test AVD stopped after acceptance)",
+      "Medium_Phone_API_36.1 (current visible device)"
+    ],
+    "finalMemberLoginVerified": true
+  }
+}

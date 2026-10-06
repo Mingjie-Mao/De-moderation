@@ -2,6 +2,7 @@ package com.campusguard.moderation;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -75,6 +76,23 @@ class ModerationRevisionIntegrationTest extends AbstractIntegrationTest {
                         AuditLogger.CASE_RESOLVED,
                         AuditLogger.CONTENT_RESTORED,
                         AuditLogger.CASE_DECISION_REVISED);
+    }
+
+    @Test
+    void revisingAHideDoesNotRepublishContentDeletedByItsAuthor() throws Exception {
+        User author = newUser();
+        User admin = newAdmin();
+        UUID postId = createPost(author, uniqueForumKey(), "Reported before the author removed it");
+        UUID caseId = reportedCaseFor(postId);
+
+        mockMvc.perform(delete("/api/posts/{id}", postId)
+                        .header("Authorization", bearer(author)))
+                .andExpect(status().isNoContent());
+        decide(admin, caseId, FinalAction.HIDE).andExpect(status().isOk());
+        decide(admin, caseId, FinalAction.NONE).andExpect(status().isOk());
+
+        mockMvc.perform(get("/api/posts/{id}", postId)).andExpect(status().isNotFound());
+        assertThat(actionsFor(postId)).doesNotContain(AuditLogger.CONTENT_RESTORED);
     }
 
     @Test

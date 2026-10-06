@@ -12,6 +12,7 @@ import com.campusguard.audit.AuditActorType;
 import com.campusguard.audit.AuditEntry;
 import com.campusguard.audit.AuditEntryRepository;
 import com.campusguard.common.TargetType;
+import com.campusguard.common.ConflictException;
 import com.campusguard.common.TooManyRequestsException;
 import com.campusguard.moderation.FinalAction;
 import com.campusguard.moderation.CaseStatus;
@@ -25,6 +26,8 @@ import com.campusguard.user.User;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import com.campusguard.moderation.admin.AdminModerationService;
@@ -32,6 +35,7 @@ import com.campusguard.moderation.engine.ai.AiInvocationRecorder;
 import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.context.annotation.Bean;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.TestPropertySource;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
@@ -83,6 +87,8 @@ class InvestigationApiIntegrationTest extends AbstractIntegrationTest {
 
         private final java.util.concurrent.atomic.AtomicInteger calls =
                 new java.util.concurrent.atomic.AtomicInteger();
+        private volatile CountDownLatch entered;
+        private volatile CountDownLatch release;
 
         int calls() {
             return calls.get();
@@ -90,6 +96,22 @@ class InvestigationApiIntegrationTest extends AbstractIntegrationTest {
 
         void reset() {
             calls.set(0);
+            entered = null;
+            release = null;
+        }
+
+        void blockNextCall() {
+            entered = new CountDownLatch(1);
+            release = new CountDownLatch(1);
+        }
+
+        boolean awaitCall() throws InterruptedException {
+            return entered.await(20, TimeUnit.SECONDS);
+        }
+
+        void unblock() {
+            CountDownLatch waiting = release;
+            if (waiting != null) waiting.countDown();
         }
 
         @Override
@@ -100,6 +122,18 @@ class InvestigationApiIntegrationTest extends AbstractIntegrationTest {
         @Override
         public Response next(String system, List<Message> history, List<ToolSpec> specs) {
             calls.incrementAndGet();
+            CountDownLatch started = entered;
+            CountDownLatch waiting = release;
+            if (started != null && waiting != null) {
+                started.countDown();
+                try {
+                    if (!waiting.await(20, TimeUnit.SECONDS))
+                        throw new IllegalStateException("Timed out waiting to release the model.");
+                } catch (InterruptedException ex) {
+                    Thread.currentThread().interrupt();
+                    throw new IllegalStateException("Interrupted while waiting to release the model.", ex);
+                }
+            }
             return new Response(new Turn.Finished("""
                     {"summary":"Nothing in the record.","recommendation":"NONE","confidence":"OPEN",
                      "counterEvidence":"The report may yet be right.","citedCaseIds":[]}
@@ -129,6 +163,12 @@ class InvestigationApiIntegrationTest extends AbstractIntegrationTest {
 
     @Autowired
     private InvestigationRecorder recorder;
+
+    @Autowired
+    private InvestigationLease lease;
+
+    @Autowired
+    private JdbcTemplate jdbc;
 
     @Autowired
     private ModerationCaseRepository cases;
@@ -341,6 +381,50 @@ class InvestigationApiIntegrationTest extends AbstractIntegrationTest {
         service.investigate(admin.getId(), caseId, false);
 
         assertThat(stubModel.calls()).isEqualTo(1);
+    }
+
+    @Test
+    void simultaneousReviewersCannotRunTheSameInvestigationTwice() throws Exception {
+        User firstAdmin = newAdmin();
+        User secondAdmin = newAdmin();
+        UUID caseId = awaitingReviewCase(newUser());
+        stubModel.blockNextCall();
+
+        try (var pool = java.util.concurrent.Executors.newSingleThreadExecutor()) {
+            var first = pool.submit(() -> service.investigate(firstAdmin.getId(), caseId, false));
+            try {
+                assertThat(stubModel.awaitCall()).isTrue();
+                assertThatThrownBy(() -> service.investigate(secondAdmin.getId(), caseId, false))
+                        .isInstanceOf(ConflictException.class)
+                        .hasMessageContaining("already in progress");
+            } finally {
+                stubModel.unblock();
+            }
+            assertThat(first.get(20, TimeUnit.SECONDS).outcome())
+                    .isEqualTo(InvestigationBriefView.COMPLETE);
+        }
+        assertThat(service.investigate(secondAdmin.getId(), caseId, false).outcome())
+                .isEqualTo(InvestigationBriefView.COMPLETE);
+        assertThat(stubModel.calls()).isEqualTo(1);
+    }
+
+    @Test
+    void anExpiredLeaseCanBeTakenOverButNotReleasedByItsOldOwner() {
+        UUID caseId = awaitingReviewCase(newUser());
+        UUID oldOwner = UUID.randomUUID();
+        UUID newOwner = UUID.randomUUID();
+
+        assertThat(lease.acquire(caseId, oldOwner)).isTrue();
+        assertThat(lease.acquire(caseId, newOwner)).isFalse();
+        jdbc.update("UPDATE investigation_leases SET lease_until = now() - interval '1 second' WHERE case_id = ?",
+                caseId);
+        assertThat(lease.acquire(caseId, newOwner)).isTrue();
+        lease.release(caseId, oldOwner);
+        assertThat(lease.acquire(caseId, UUID.randomUUID())).isFalse();
+        lease.release(caseId, newOwner);
+        UUID thirdOwner = UUID.randomUUID();
+        assertThat(lease.acquire(caseId, thirdOwner)).isTrue();
+        lease.release(caseId, thirdOwner);
     }
 
     @Test

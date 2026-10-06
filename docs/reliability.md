@@ -5,6 +5,15 @@ the thing that is supposed to police it.
 
 ## The queue is durable, not merely asynchronous
 
+A committed report publishes an after-commit wake-up hint to a bounded background
+worker (one running drain and one pending hint). Rollback publishes no runnable
+work. The hint carries no queue payload: persisted case rows remain the source of
+truth, and redundant hints can be coalesced without losing cases. Full batches
+are drained immediately. Periodic polling recovers missed hints and stalled
+claims; the Northflank demo uses a 30-minute interval to allow idle Neon compute
+to suspend, while the development default remains two seconds. Recovery after a
+process failure can therefore wait up to the configured interval.
+
 Reports become moderation cases; a worker claims a batch and analyses it. The
 claim uses `SELECT ... FOR UPDATE SKIP LOCKED`, so a second instance takes
 different rows rather than queueing behind rows the first already holds, and the
@@ -59,7 +68,7 @@ Around the call itself:
 
 ## Reply nesting is capped in the schema
 
-Threads are assembled by recursing once per nesting level, and nothing limited
+The original thread reader assembled replies recursively, and nothing limited
 how deep a reply could go. A chain of eight thousand answered the public comments
 endpoint with a `StackOverflowError` — measured on a running server, and
 reachable by a single account replying to itself.
@@ -86,10 +95,11 @@ a unique position: two rows created in the same microsecond leave the boundary
 ambiguous. It is base64-encoded so clients treat it as a token to hand back
 rather than a timestamp to do arithmetic on.
 
-Threads page the same way, by top-level comment. Only roots are paged — a reply
-cannot be rendered without the comment it answers, so half a conversation is not
-something a client can reassemble. A page is a whole conversation, and depth is
-bounded separately by the constraint above.
+Threads use the same keyset cursor, but count roots and replies alike toward the
+page size. Paging roots alone let one root with many replies cause an unbounded
+database read and response. The flat rows carry `parentCommentId`; Android
+merges pages and assembles the tree locally. The partial index on
+`(post_id, created_at, id)` keeps each seek bounded.
 
 ## Authoring is rate limited, not just reporting
 
@@ -105,7 +115,9 @@ at once.
 
 ## Concurrent reports collapse into one case
 
-Several reports on one target become one case and therefore one engine call. The
+Concurrent reports on one target join one open case, avoiding duplicate
+analysis jobs. This is not an exactly-once guarantee for vendor requests: output
+correction, transport retries and recovery after a crash can call the model again. The
 guarantee is a partial unique index rather than a check in application code, so
 two reports arriving at the same instant cannot both create a case. It is covered
 by a test that fires two of them at once against a real PostgreSQL.
@@ -119,3 +131,43 @@ including a `CHAR(64)` column that should have been `VARCHAR`.
 
 `open-in-view` is off, so an unfetched association fails loudly rather than
 turning a feed into one query per row.
+
+## Interactive latency (2026-10-06)
+
+Android votes are optimistic projections over the last server state: icon and
+score change immediately, duplicate submissions are suppressed until the response,
+and success replaces the preview with authoritative state. Failure removes the
+preview and invalidates freshness so the next render reads the server again;
+a missing response is not proof that a write failed to commit.
+
+Comments already in AppData remain visible while a stale thread refreshes.
+Freshness and pagination metadata are memory-only, account/origin scoped, limited
+to 30 entries and valid for 15 seconds. Returning within that window avoids another
+request and preserves loaded later pages. Older data is refreshed from the first
+bounded page; a cache reset or scope change forces a read. Expanding loaded
+replies is local. RecyclerView retains its adapter and applies row differences;
+change cross-fades are disabled to avoid rebind flicker.
+
+Market batches forum activity counts, candle observations and history reads
+across the four forums. Snapshot SQL round trips fall from 19 to 6, excluding
+authentication and transaction control; leaderboard falls from 17 to 3. Rankings
+and trades use current prices without reading history. Wallet initialization,
+UTC daily crediting and row locking use one UPSERT RETURNING; the transaction
+still serializes trades, and request IDs retain their original idempotency checks.
+This adds no schema migration, distributed cache or periodic background queries.
+
+Acceptance: 57 Android unit tests, 10 emulator workflow tests and 5 PostgreSQL
+community/market integration tests passed. Device tests cover a held vote response,
+immediate preview, duplicate rejection, failed-response rollback and reopening/
+expanding cached comments without an additional request. PostgreSQL checks cover
+concurrent replay, insufficient funds, daily crediting, candle ordering/limits and
+the real daily baseline. Daily-credit test setup uses UTC rather than database
+session current_date, which can differ after Sydney midnight.
+
+The 512 MiB deployment briefly displayed near-limit memory after startup. A
+container check at minute 13 measured 486.8 MiB total, including 108.9 MiB file
+cache (71.9 MiB inactive); Java RSS was about 395 MiB. OOM and OOM-kill counters
+were zero, with zero restarts and all three probes passing. This is a single
+observation, not evidence of capacity under sustained load or absence of leaks.
+The detailed latency and runtime observations are recorded in
+`deploy/northflank/latency-verification.json`.

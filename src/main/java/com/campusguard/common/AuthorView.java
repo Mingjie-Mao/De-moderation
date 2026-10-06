@@ -9,9 +9,9 @@ import java.util.UUID;
  * <p>Shared by posts and comments so that no response path can accidentally
  * widen into leaking a password hash or an account's moderation status.
  */
-public record AuthorView(UUID id, String username, String displayName) {
+public record AuthorView(UUID id, String username, String displayName, String avatarUrl, int avatarColor) {
 
     public static AuthorView of(User user) {
-        return new AuthorView(user.getId(), user.getUsername(), user.getDisplayName());
+        return new AuthorView(user.getId(), user.getUsername(), user.getDisplayName(), user.getAvatarUrl(), user.getAvatarColor());
     }
 }

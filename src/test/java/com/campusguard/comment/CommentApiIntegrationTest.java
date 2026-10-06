@@ -18,7 +18,7 @@ import org.springframework.http.MediaType;
 class CommentApiIntegrationTest extends AbstractIntegrationTest {
 
     @Test
-    void nestsRepliesUnderTheirParent() throws Exception {
+    void returnsFlatCommentsWithParentIdsForClientAssembly() throws Exception {
         User author = newUser();
         UUID postId = createPost(author);
 
@@ -28,28 +28,30 @@ class CommentApiIntegrationTest extends AbstractIntegrationTest {
 
         mockMvc.perform(get("/api/posts/{postId}/comments", postId))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.items", hasSize(2)))
+                .andExpect(jsonPath("$.items", hasSize(3)))
                 .andExpect(jsonPath("$.items[0].body").value("Top level"))
                 .andExpect(jsonPath("$.items[0].parentCommentId").value(nullValue()))
-                .andExpect(jsonPath("$.items[0].replies", hasSize(1)))
-                .andExpect(jsonPath("$.items[0].replies[0].body").value("A reply"))
-                .andExpect(jsonPath("$.items[0].replies[0].parentCommentId").value(topLevel.toString()))
-                .andExpect(jsonPath("$.items[1].body").value("Another top level"))
-                .andExpect(jsonPath("$.items[1].replies", hasSize(0)));
+                .andExpect(jsonPath("$.items[0].replies", hasSize(0)))
+                .andExpect(jsonPath("$.items[1].body").value("A reply"))
+                .andExpect(jsonPath("$.items[1].parentCommentId").value(topLevel.toString()))
+                .andExpect(jsonPath("$.items[2].body").value("Another top level"));
     }
 
     @Test
-    void nestsRepliesUpToTheCeiling() throws Exception {
+    void preservesTheParentChainUpToTheCeiling() throws Exception {
         User author = newUser();
         UUID postId = createPost(author);
 
         UUID first = createComment(author, postId, null, "Depth 1");
         UUID second = createComment(author, postId, first, "Depth 2");
-        createComment(author, postId, second, "Depth 3");
+        UUID third = createComment(author, postId, second, "Depth 3");
 
         mockMvc.perform(get("/api/posts/{postId}/comments", postId))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.items[0].replies[0].replies[0].body").value("Depth 3"));
+                .andExpect(jsonPath("$.items", hasSize(3)))
+                .andExpect(jsonPath("$.items[1].parentCommentId").value(first.toString()))
+                .andExpect(jsonPath("$.items[2].id").value(third.toString()))
+                .andExpect(jsonPath("$.items[2].parentCommentId").value(second.toString()));
     }
 
     /**

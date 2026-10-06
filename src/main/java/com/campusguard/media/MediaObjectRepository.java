@@ -10,6 +10,14 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
 public interface MediaObjectRepository extends JpaRepository<MediaObject, UUID> {
+    @Query(value = """
+            SELECT EXISTS(SELECT 1 FROM posts WHERE media_id=:id AND deleted_at IS NULL)
+                OR EXISTS(SELECT 1 FROM comments c JOIN posts p ON p.id=c.post_id
+                          WHERE c.media_id=:id AND c.deleted_at IS NULL AND p.deleted_at IS NULL)
+                OR EXISTS(SELECT 1 FROM users WHERE avatar_media_id=:id AND status='ACTIVE')
+            """, nativeQuery = true)
+    boolean hasVisibleReference(@Param("id") UUID id);
+
     @Query("select count(p) from Post p where p.media.id = :mediaId and p.deletedAt is null")
     long countVisiblePostReferences(@Param("mediaId") UUID mediaId);
 
@@ -38,8 +46,10 @@ public interface MediaObjectRepository extends JpaRepository<MediaObject, UUID> 
     @Query("""
             select m from MediaObject m
             where m.createdAt < :before
+              and not exists (select 1 from User u where u.avatarMediaId = m.id)
               and not exists (select 1 from Post p where p.media = m)
               and not exists (select 1 from Comment c where c.media = m)
+              and not exists (select 1 from ModerationCase mc where mc.reportedMediaId = m.id)
             order by m.createdAt
             """)
     List<MediaObject> findUnreferencedBefore(@Param("before") Instant before, Pageable pageable);

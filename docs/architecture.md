@@ -4,7 +4,7 @@
 
 ```mermaid
 flowchart LR
-    android["Android member app<br/>backend-first UI cache"]
+    android["Android forum + admin app<br/>backend-first UI cache"]
     admin["Browser reviewer console"]
 
     subgraph backend["De-Moderation backend"]
@@ -18,11 +18,11 @@ flowchart LR
         eval["Evaluation harness"]
     end
 
-    db[("PostgreSQL 16")]
+    db[("PostgreSQL<br/>local 16 / demo 18")]
     files[("Media volume / object store")]
     google["Gemini API"]
 
-    android -->|"profile, feed, media, report, appeal"| api
+    android -->|"profile, feed, media, report, review, appeal"| api
     admin -->|"claim, review, decide"| api
     api --> workflow
     api --> media
@@ -60,6 +60,7 @@ sequenceDiagram
     M->>API: POST /api/reports
     API->>DB: open or join the case for this target
     Note over DB: partial unique index on open cases:<br/>concurrent reports collapse into one
+    API-->>W: after-commit wake-up hint
     API-->>M: 201, status AGGREGATED
 
     W->>DB: SELECT ... FOR UPDATE SKIP LOCKED
@@ -149,6 +150,11 @@ it describes. A log that loses its subject when a user is deleted is not evidenc
 
 `moderation_cases` has no global total-count column and the feed has no count query. A
 number that costs a full scan and is stale on arrival is not worth the scan.
+
+The first report also freezes the target's title, body, author and media id in
+`moderation_cases`. Analysis, reviewer detail and corpus export use this version;
+legacy cases without a snapshot fall back to the current content. The media sweep
+keeps objects referenced by a case even after the author detaches them.
 
 ## Where the seams are
 

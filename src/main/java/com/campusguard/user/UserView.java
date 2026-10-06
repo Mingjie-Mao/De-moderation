@@ -9,7 +9,7 @@ public record UserView(
         String displayName,
         String bio,
         UserRole role,
-        Instant createdAt) {
+        Instant createdAt, String avatarUrl, int avatarColor) {
 
     static UserView of(User user) {
         return new UserView(
@@ -18,6 +18,6 @@ public record UserView(
                 user.getDisplayName(),
                 user.getBio(),
                 user.getRole(),
-                user.getCreatedAt());
+                user.getCreatedAt(), user.getAvatarUrl(), user.getAvatarColor());
     }
 }
