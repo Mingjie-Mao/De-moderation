@@ -7,15 +7,31 @@ import java.util.*;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 
 /** An account's wallet lock covers crediting, positions and the immutable trade ledger. */
 @Service
 public class MarketService {
   private final JdbcClient db;
+  private final TransactionTemplate tx;
   private static final List<String> FORUMS = List.of("anu", "unsw", "usyd", "um");
 
-  public MarketService(JdbcClient db) {
+  /** Activity in the last 24 hours, priced by the heat formula. Reads only. */
+  private static final String PRICED = """
+WITH counts AS (SELECT f.forum_key,
+ (SELECT count(*) FROM posts p WHERE p.forum_key=f.forum_key AND p.deleted_at IS NULL AND p.created_at>=now()-interval '24 hours') AS posts,
+ (SELECT count(*) FROM comments c JOIN posts p ON p.id=c.post_id WHERE p.forum_key=f.forum_key AND p.deleted_at IS NULL AND c.deleted_at IS NULL AND c.created_at>=now()-interval '24 hours') AS replies,
+ coalesce((SELECT sum(v.value) FROM post_votes v JOIN posts p ON p.id=v.post_id WHERE p.forum_key=f.forum_key AND p.deleted_at IS NULL AND v.created_at>=now()-interval '24 hours'),0)+
+ coalesce((SELECT sum(v.value) FROM comment_votes v JOIN comments c ON c.id=v.comment_id JOIN posts p ON p.id=c.post_id WHERE p.forum_key=f.forum_key AND p.deleted_at IS NULL AND c.deleted_at IS NULL AND v.created_at>=now()-interval '24 hours'),0) AS likes
+FROM (VALUES ('anu'),('unsw'),('usyd'),('um')) f(forum_key)),
+priced AS (
+ SELECT counts.*, greatest(1,least(10000,floor(100+2*posts+1.5*replies+0.8*likes+
+     5*greatest(0,(posts+replies/5.0-30)/10.0)+0.5)))::integer AS price FROM counts
+)""";
+
+  public MarketService(JdbcClient db, TransactionTemplate tx) {
     this.db = db;
+    this.tx = tx;
   }
 
   public enum Action {
@@ -46,20 +62,19 @@ RETURNING *
         .param("u", user).param("today", LocalDate.now(ZoneOffset.UTC)).query().singleRow();
   }
 
-  private List<Map<String, Object>> quotes(boolean includeHistory) {
-    Instant bucket = Instant.ofEpochSecond(Instant.now().getEpochSecond() / 300 * 300);
-    // Derive and record the quote atomically in one database round trip.
-    var counts = db.sql("""
-WITH counts AS (SELECT f.forum_key,
- (SELECT count(*) FROM posts p WHERE p.forum_key=f.forum_key AND p.deleted_at IS NULL AND p.created_at>=now()-interval '24 hours') AS posts,
- (SELECT count(*) FROM comments c JOIN posts p ON p.id=c.post_id WHERE p.forum_key=f.forum_key AND p.deleted_at IS NULL AND c.deleted_at IS NULL AND c.created_at>=now()-interval '24 hours') AS replies,
- coalesce((SELECT sum(v.value) FROM post_votes v JOIN posts p ON p.id=v.post_id WHERE p.forum_key=f.forum_key AND p.deleted_at IS NULL AND v.created_at>=now()-interval '24 hours'),0)+
- coalesce((SELECT sum(v.value) FROM comment_votes v JOIN comments c ON c.id=v.comment_id JOIN posts p ON p.id=c.post_id WHERE p.forum_key=f.forum_key AND p.deleted_at IS NULL AND c.deleted_at IS NULL AND v.created_at>=now()-interval '24 hours'),0) AS likes
-FROM (VALUES ('anu'),('unsw'),('usyd'),('um')) f(forum_key)),
-priced AS (
- SELECT counts.*, greatest(1,least(10000,floor(100+2*posts+1.5*replies+0.8*likes+
-     5*greatest(0,(posts+replies/5.0-30)/10.0)+0.5)))::integer AS price FROM counts
-), recorded AS (
+  /**
+   * Current quotes. Only a market view records them as a candle: every view
+   * upserts the same four rows, so that write runs as its own short statement
+   * and never inside a wallet transaction, where its row locks would be held to
+   * commit and queue every account's request behind each other. Trades and the
+   * leaderboard only read the price.
+   */
+  private List<Map<String, Object>> quotes(boolean observe) {
+    List<Map<String, Object>> counts;
+    if (observe) {
+      Instant bucket = Instant.ofEpochSecond(Instant.now().getEpochSecond() / 300 * 300);
+      counts = db.sql(PRICED + """
+, recorded AS (
  INSERT INTO market_candles(forum_key,bucket,open,high,low,close)
  SELECT forum_key,:bucket,price,price,price,price FROM priced ORDER BY forum_key
  ON CONFLICT(forum_key,bucket) DO UPDATE SET
@@ -68,6 +83,9 @@ priced AS (
 )
 SELECT priced.* FROM priced JOIN recorded USING(forum_key)
 """).param("bucket",java.sql.Timestamp.from(bucket)).query().listOfRows();
+    } else {
+      counts = db.sql(PRICED + "\nSELECT * FROM priced").query().listOfRows();
+    }
     var result = new ArrayList<Map<String, Object>>();
     for (var count : counts) {
       String forum = (String) count.get("forum_key");
@@ -79,7 +97,7 @@ SELECT priced.* FROM priced JOIN recorded USING(forum_key)
       result.add(quote);
     }
     // Trading and rankings need current prices, not thousands of candle values.
-    if (!includeHistory) return result;
+    if (!observe) return result;
     var history = db.sql("""
 SELECT f.forum_key,c.bucket,c.open,c.high,c.low,c.close,c.source,
  (SELECT close FROM market_candles b WHERE b.forum_key=f.forum_key AND b.bucket>=now()-interval '24 hours' ORDER BY bucket LIMIT 1) AS baseline
@@ -153,17 +171,12 @@ ORDER BY f.forum_key,c.bucket
         positions);
   }
 
-  @Transactional
+  /** Deliberately not transactional: the candle is recorded before the wallet is locked. */
   public Map<String, Object> snapshot(UUID user) {
-    var w = wallet(user);
     var quotes = quotes(true);
-    return Map.of(
-        "quotes",
-        quotes,
-        "portfolio",
-        portfolio(user, w, prices(quotes)),
-        "serverTime",
-        Instant.now());
+    var prices = prices(quotes);
+    var portfolio = tx.execute(status -> portfolio(user, wallet(user), prices));
+    return Map.of("quotes", quotes, "portfolio", portfolio, "serverTime", Instant.now());
   }
 
   @Transactional
@@ -292,7 +305,6 @@ ORDER BY f.forum_key,c.bucket
         replay);
   }
 
-  @Transactional
   public Map<String, Object> leaderboard(int page, int size) {
     var prices = prices(quotes(false));
     var rows =

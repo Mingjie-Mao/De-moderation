@@ -19,6 +19,7 @@ class CommunityMarketIntegrationTest extends AbstractIntegrationTest {
   @Autowired PostRepository posts;
   @Autowired MarketService market;
   @Autowired JdbcClient db;
+  @Autowired org.springframework.transaction.support.TransactionTemplate transactions;
 
   @Test
   void socialPersistsScopesAndHides() throws Exception {
@@ -281,5 +282,42 @@ ON CONFLICT(forum_key,bucket) DO UPDATE SET open=80,high=80,low=80,close=80
                 .content("{\"value\":1}"))
         .andExpect(status().isNotFound());
     mockMvc.perform(get("/api/market")).andExpect(status().isUnauthorized());
+  }
+
+  @Test
+  void openTradeDoesNotHoldUpOtherAccountsMarketViews() throws Exception {
+    var trader = newUser();
+    var viewer = newUser();
+    int price = price(trader.getId());
+    var traded = new CountDownLatch(1);
+    var release = new CountDownLatch(1);
+    try (var executor = Executors.newSingleThreadExecutor()) {
+      // Keep the trade's transaction open: whatever it locked stays locked.
+      var pending =
+          executor.submit(
+              () ->
+                  transactions.execute(
+                      status -> {
+                        market.trade(
+                            trader.getId(),
+                            new MarketService.Trade(
+                                UUID.randomUUID(), "anu", MarketService.Action.BUY, 1, price));
+                        traded.countDown();
+                        try {
+                          release.await(30, TimeUnit.SECONDS);
+                        } catch (InterruptedException e) {
+                          Thread.currentThread().interrupt();
+                        }
+                        return null;
+                      }));
+      assertThat(traded.await(10, TimeUnit.SECONDS)).isTrue();
+      try {
+        var view = CompletableFuture.supplyAsync(() -> market.snapshot(viewer.getId()));
+        assertThat(view.get(5, TimeUnit.SECONDS)).containsKey("quotes");
+      } finally {
+        release.countDown();
+      }
+      pending.get();
+    }
   }
 }

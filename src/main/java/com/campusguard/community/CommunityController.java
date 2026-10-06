@@ -1,9 +1,12 @@
 package com.campusguard.community;
 
 import com.campusguard.common.NotFoundException;
+import com.campusguard.common.PageCursor;
 import com.campusguard.security.AuthenticatedUser;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.*;
+import java.sql.Timestamp;
+import java.time.Instant;
 import java.util.*;
 import org.springframework.http.HttpStatus;
 import org.springframework.jdbc.core.simple.JdbcClient;
@@ -70,8 +73,8 @@ FROM comments c JOIN posts p ON p.id=c.post_id WHERE c.id IN (:ids) AND c.delete
             ? List.of()
             : db.sql(
                     """
-SELECT u.id,(SELECT count(*) FROM user_follows WHERE followed_id=u.id) AS followers,
-(SELECT count(*) FROM user_follows WHERE follower_id=u.id) AS following,
+SELECT u.id,(SELECT count(*) FROM user_follows f JOIN users o ON o.id=f.follower_id WHERE f.followed_id=u.id AND o.status='ACTIVE') AS followers,
+(SELECT count(*) FROM user_follows f JOIN users o ON o.id=f.followed_id WHERE f.follower_id=u.id AND o.status='ACTIVE') AS following,
 EXISTS(SELECT 1 FROM user_follows WHERE followed_id=u.id AND follower_id=:me) AS followed,
 (SELECT count(*) FROM post_votes v JOIN posts p ON p.id=v.post_id WHERE p.author_id=u.id AND p.deleted_at IS NULL AND v.value=1) AS likes,
 (SELECT count(*) FROM post_bookmarks b JOIN posts p ON p.id=b.post_id WHERE p.author_id=u.id AND p.deleted_at IS NULL) AS bookmarks
@@ -199,14 +202,18 @@ FROM users u WHERE u.id IN (:ids)
   public Map<String, Object> collection(
       @AuthenticationPrincipal Jwt jwt,
       @RequestParam CollectionKind kind,
-      @RequestParam(required = false) UUID cursor,
+      @RequestParam(required = false) String cursor,
       @RequestParam(defaultValue = "30") @Min(1) @Max(100) int size) {
     String table = kind == CollectionKind.LIKED ? "post_votes" : "post_bookmarks";
     String positive = kind == CollectionKind.LIKED ? " AND x.value=1" : "";
+    PageCursor from = cursor(cursor);
+    // Most recently liked or saved first. Ids are random, so ordering by them
+    // alone would shuffle the list.
     var rows =
         db.sql(
                 "SELECT p.id,p.category,p.pin_rank,p.forum_key AS \"forumKey\",p.title,p.body,u.id AS"
-                    + " author_id,u.username,u.display_name,u.avatar_media_id,u.avatar_color,p.created_at AS \"createdAt\", CASE"
+                    + " author_id,u.username,u.display_name,u.avatar_media_id,u.avatar_color,p.created_at AS \"createdAt\","
+                    + " x.created_at AS saved_at, CASE"
                     + " WHEN p.media_id IS NULL THEN NULL ELSE '/api/media/'||p.media_id||'?v=2'"
                     + " END AS"
                     + " \"mediaUrl\",json_build_object('id',u.id,'username',u.username,'displayName',u.display_name)"
@@ -214,10 +221,12 @@ FROM users u WHERE u.id IN (:ids)
                     + table
                     + " x ON x.post_id=p.id WHERE x.user_id=:me"
                     + positive
-                    + " AND p.deleted_at IS NULL AND (:cursor::uuid IS NULL OR p.id>:cursor::uuid)"
-                    + " ORDER BY p.id LIMIT :limit")
+                    + " AND p.deleted_at IS NULL AND (CAST(:at AS timestamptz) IS NULL"
+                    + " OR (x.created_at,p.id)<(CAST(:at AS timestamptz),CAST(:after AS uuid)))"
+                    + " ORDER BY x.created_at DESC,p.id DESC LIMIT :limit")
             .param("me", AuthenticatedUser.idOf(jwt))
-            .param("cursor", cursor)
+            .param("at", from == null ? null : Timestamp.from(from.createdAt()))
+            .param("after", from == null ? null : from.id())
             .param("limit", size + 1)
             .query(
                 (rs, n) -> {
@@ -228,46 +237,54 @@ FROM users u WHERE u.id IN (:ids)
                   m.put("title", rs.getString("title"));
                   m.put("body", rs.getString("body"));
                   m.put("createdAt", rs.getTimestamp("createdAt").toInstant());
+                  m.put("savedAt", rs.getTimestamp("saved_at").toInstant());
                   m.put("mediaUrl", rs.getString("mediaUrl"));
                   m.put("author", author(rs.getObject("author_id"), rs.getString("username"), rs.getString("display_name"),
                           rs.getObject("avatar_media_id"), rs.getInt("avatar_color")));
                   return m;
                 })
             .list();
-    return page(rows, size);
+    return page(rows, size, "savedAt");
   }
 
   @GetMapping("/users/{id}/{relation:following|followers}")
   public Map<String, Object> people(
       @PathVariable UUID id,
       @PathVariable String relation,
-      @RequestParam(required = false) UUID cursor,
+      @RequestParam(required = false) String cursor,
       @RequestParam(defaultValue = "30") @Min(1) @Max(100) int size) {
     boolean following = relation.equals("following");
     String target = following ? "followed_id" : "follower_id",
         owner = following ? "follower_id" : "followed_id";
+    PageCursor from = cursor(cursor);
+    // Suspended and banned accounts cannot be followed, so they are not listed
+    // as relations either. Newest relation first.
     var rows =
         db.sql(
-                "SELECT u.id,u.username,coalesce(u.display_name,u.username) AS \"displayName\" FROM"
-                    + " user_follows f JOIN users u ON u.id=f."
+                "SELECT u.id,u.username,coalesce(u.display_name,u.username) AS \"displayName\","
+                    + " f.created_at AS since FROM user_follows f JOIN users u ON u.id=f."
                     + target
                     + " WHERE f."
                     + owner
-                    + "=:id AND (:cursor::uuid IS NULL OR u.id>:cursor::uuid) ORDER BY u.id LIMIT"
-                    + " :limit")
+                    + "=:id AND u.status='ACTIVE' AND (CAST(:at AS timestamptz) IS NULL"
+                    + " OR (f.created_at,u.id)<(CAST(:at AS timestamptz),CAST(:after AS uuid)))"
+                    + " ORDER BY f.created_at DESC,u.id DESC LIMIT :limit")
             .param("id", id)
-            .param("cursor", cursor)
+            .param("at", from == null ? null : Timestamp.from(from.createdAt()))
+            .param("after", from == null ? null : from.id())
             .param("limit", size + 1)
             .query()
             .listOfRows();
-    return page(rows, size);
+    for (var row : rows) row.put("since", ((Timestamp) row.get("since")).toInstant());
+    return page(rows, size, "since");
   }
 
 
   @GetMapping("/users/{id}/comments")
   public Map<String,Object> authorComments(@PathVariable UUID id,
-      @RequestParam(required=false) UUID cursor,
+      @RequestParam(required=false) String cursor,
       @RequestParam(defaultValue="30") @Min(1) @Max(100) int size) {
+    PageCursor from=cursor(cursor);
     var rows=db.sql("""
 SELECT c.id,c.body,c.parent_comment_id,c.created_at,c.media_id,
  p.id AS post_id,p.forum_key,p.title,p.body AS post_body,p.created_at AS post_created,
@@ -275,8 +292,10 @@ SELECT c.id,c.body,c.parent_comment_id,c.created_at,c.media_id,
  u.id AS author_id,u.username,u.display_name,u.avatar_media_id,u.avatar_color,pu.id AS post_author_id,pu.username AS post_username,pu.display_name AS post_display,pu.avatar_media_id AS post_avatar,pu.avatar_color AS post_color
 FROM comments c JOIN posts p ON p.id=c.post_id JOIN users u ON u.id=c.author_id JOIN users pu ON pu.id=p.author_id
 WHERE c.author_id=:id AND c.deleted_at IS NULL AND p.deleted_at IS NULL
-AND (:cursor::uuid IS NULL OR c.id>:cursor::uuid) ORDER BY c.id LIMIT :limit
-""").param("id",id).param("cursor",cursor).param("limit",size+1).query((rs,n)->{
+AND (CAST(:at AS timestamptz) IS NULL OR (c.created_at,c.id)<(CAST(:at AS timestamptz),CAST(:after AS uuid)))
+ORDER BY c.created_at DESC,c.id DESC LIMIT :limit
+""").param("id",id).param("at",from==null?null:Timestamp.from(from.createdAt())).param("after",from==null?null:from.id())
+    .param("limit",size+1).query((rs,n)->{
       var row=new LinkedHashMap<String,Object>(); row.put("id",rs.getObject("id"));
       row.put("body",rs.getString("body")); row.put("parentCommentId",rs.getObject("parent_comment_id"));
       row.put("createdAt",rs.getTimestamp("created_at").toInstant());
@@ -288,7 +307,7 @@ AND (:cursor::uuid IS NULL OR c.id>:cursor::uuid) ORDER BY c.id LIMIT :limit
       post.put("mediaUrl",rs.getObject("post_media")==null?null:"/api/media/"+rs.getObject("post_media")+"?v=2");
       post.put("author",author(rs.getObject("post_author_id"),rs.getString("post_username"),rs.getString("post_display"),rs.getObject("post_avatar"),rs.getInt("post_color")));
       row.put("post",post); return row;
-    }).list(); return page(rows,size);
+    }).list(); return page(rows,size,"createdAt");
   }
 
   private static Map<String, Object> author(Object id, String username, String name, Object avatarId, int color) {
@@ -298,13 +317,24 @@ AND (:cursor::uuid IS NULL OR c.id>:cursor::uuid) ORDER BY c.id LIMIT :limit
     return view;
   }
 
-  private static Map<String, Object> page(List<? extends Map<String, Object>> rows, int size) {
+  private static PageCursor cursor(String encoded) {
+    return encoded == null || encoded.isBlank() ? null : PageCursor.decode(encoded);
+  }
+
+  /** {@code positionKey} names the instant each list is ordered by; the id breaks its ties. */
+  private static Map<String, Object> page(
+      List<? extends Map<String, Object>> rows, int size, String positionKey) {
     boolean more = rows.size() > size;
     var items = rows.subList(0, Math.min(size, rows.size()));
     var result = new LinkedHashMap<String, Object>();
     result.put("items", items);
     result.put("hasMore", more);
-    result.put("nextCursor", more ? items.get(items.size() - 1).get("id") : null);
+    var last = more ? items.getLast() : null;
+    result.put(
+        "nextCursor",
+        last == null
+            ? null
+            : new PageCursor((Instant) last.get(positionKey), (UUID) last.get("id")).encode());
     return result;
   }
 }
