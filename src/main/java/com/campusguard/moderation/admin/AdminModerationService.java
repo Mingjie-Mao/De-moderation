@@ -54,8 +54,13 @@ public class AdminModerationService {
 
     @Transactional(readOnly = true)
     public List<ModerationCaseView> list(CaseStatus status, Pageable pageable) {
-        return caseRepository.findByStatus(status, pageable).stream()
-                .map(ModerationCaseView::of)
+        var cases = caseRepository.findByStatus(status, pageable);
+        var missing = cases.stream().filter(item -> item.reportedContent().isEmpty())
+                .map(item -> new ContentLocator.TargetRef(item.getTargetType(), item.getTargetId())).toList();
+        var fallback = contentLocator.previewsIncludingRemoved(missing);
+        return cases.stream()
+                .map(item -> ModerationCaseView.of(item, fallback.get(
+                        new ContentLocator.TargetRef(item.getTargetType(), item.getTargetId()))))
                 .toList();
     }
 

@@ -65,12 +65,10 @@ public class PostService {
     }
 
     /**
-     * Mapping to DTOs happens inside the transaction on purpose. With
-     * {@code open-in-view} disabled the persistence context closes when this
-     * method returns, so handing entities to the controller would fail on the
-     * first lazy association it touched.
+     * This read is one SELECT with author/media fetched together. It needs no
+     * explicit multi-statement transaction; all fields used by the DTO are
+     * initialized by that SELECT even with open-in-view disabled.
      */
-    @Transactional(readOnly = true)
     public FeedPage feed(String forumKey, String cursor, int size) {
         PageCursor from = cursor == null || cursor.isBlank() ? null : PageCursor.decode(cursor);
 
@@ -98,6 +96,18 @@ public class PostService {
                 .findLiveById(id)
                 .map(PostResponse::of)
                 .orElseThrow(() -> new NotFoundException("No post with id " + id));
+    }
+
+    public FeedPage authored(UUID authorId, String cursor, int size) {
+        PageCursor from = cursor == null || cursor.isBlank() ? null : PageCursor.decode(cursor);
+        PageRequest page = PageRequest.of(0, size + 1);
+        List<Post> rows = from == null ? postRepository.findAuthorFirstPage(authorId, page)
+                : postRepository.findAuthorAfter(authorId, from.createdAt(), from.id(), page);
+        boolean more = rows.size() > size;
+        List<PostResponse> items = rows.stream().limit(size).map(PostResponse::of).toList();
+        String next = more && !items.isEmpty()
+                ? new PageCursor(items.getLast().createdAt(), items.getLast().id()).encode() : null;
+        return new FeedPage(items, more, next);
     }
 
     @Transactional

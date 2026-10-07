@@ -58,6 +58,14 @@ public class PostController {
         return postService.feed(forumKey, cursor, size);
     }
 
+    @GetMapping("/authors/{authorId}")
+    @Operation(summary = "List an author's live posts across forums, newest first")
+    public FeedPage authored(@PathVariable UUID authorId,
+            @RequestParam(required = false) String cursor,
+            @RequestParam(defaultValue = "20") @Min(1) @Max(100) int size) {
+        return postService.authored(authorId, cursor, size);
+    }
+
     @GetMapping("/{id}")
     @Operation(summary = "Fetch a single live post")
     public PostResponse get(@PathVariable UUID id) {

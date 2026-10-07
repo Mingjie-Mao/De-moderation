@@ -18,12 +18,12 @@ import software.amazon.awssdk.services.s3.model.ObjectIdentifier;
 /**
  * The same contract, against the bucket a deployment will actually use.
  *
- * <p>{@link S3MediaStorageTest} runs it against MinIO, which speaks the S3 API
+ * <p>{@link S3MediaStorageTest} runs it against S3Mock, which speaks the S3 API
  * and is the right thing for CI: it needs no account and no network. What it
  * cannot answer is whether the provider a deployment is pointed at agrees —
  * Cloudflare R2, AWS and GCS differ on region naming, on whether path-style
  * addressing is required, and R2 in particular returns no region at all. Those
- * are configuration mistakes that a MinIO run cannot catch and that surface as
+ * are configuration mistakes that a mock-provider run cannot catch and that surface as
  * a media upload failing in production.
  *
  * <p>Skipped unless {@code MEDIA_S3_BUCKET} is in the environment, like the

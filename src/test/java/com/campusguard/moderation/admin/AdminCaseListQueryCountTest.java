@@ -52,6 +52,29 @@ class AdminCaseListQueryCountTest extends AbstractIntegrationTest {
     @Autowired
     private EntityManagerFactory entityManagerFactory;
 
+    @Autowired private org.springframework.jdbc.core.JdbcTemplate jdbc;
+    @Autowired private com.campusguard.post.PostRepository posts;
+    @Autowired private com.campusguard.comment.CommentRepository comments;
+
+    @Test
+    void legacyPostsAndCommentsUseBatchPreviewsIncludingRemovedContent() {
+        User author = newUser();
+        for (int i = 0; i < 6; i++) {
+            var post = posts.saveAndFlush(new com.campusguard.post.Post(uniqueForumKey(), author, "Legacy title " + i, "Legacy body " + i));
+            var comment = comments.saveAndFlush(new com.campusguard.comment.Comment(post, null, author, "Legacy comment " + i));
+            jdbc.update("insert into moderation_cases (target_type, target_id, status, report_count) values ('POST', ?, 'QUEUED', 1)", post.getId());
+            jdbc.update("insert into moderation_cases (target_type, target_id, status, report_count) values ('COMMENT', ?, 'QUEUED', 1)", comment.getId());
+            post.softDelete(java.time.Instant.now()); posts.saveAndFlush(post);
+            comment.softDelete(java.time.Instant.now()); comments.saveAndFlush(comment);
+        }
+        Statistics statistics = entityManagerFactory.unwrap(SessionFactory.class).getStatistics();
+        statistics.clear();
+        var items = adminService.list(CaseStatus.QUEUED, PageRequest.of(0, 30));
+        assertThat(statistics.getPrepareStatementCount()).isLessThanOrEqualTo(3);
+        assertThat(items.stream().filter(item -> item.contentTitle().startsWith("Legacy title"))).hasSize(6);
+        assertThat(items.stream().filter(item -> item.contentPreview().startsWith("Legacy comment"))).hasSize(6);
+    }
+
     @Test
     void listingResolvedCasesDoesNotCostAQueryPerRow() throws Exception {
         User admin = newAdmin();

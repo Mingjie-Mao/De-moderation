@@ -13,7 +13,7 @@ public record MyProfileView(
         UserStatus status,
         Instant createdAt, String avatarUrl, int avatarColor, UUID avatarMediaId, String languageTag, String theme) {
 
-    static MyProfileView of(User user) {
+    public static MyProfileView of(User user) {
         return new MyProfileView(
                 user.getId(),
                 user.getUsername(),

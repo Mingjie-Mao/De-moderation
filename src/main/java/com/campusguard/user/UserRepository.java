@@ -7,6 +7,10 @@ import java.util.List;
 
 public interface UserRepository extends JpaRepository<User, UUID> {
 
+    /** A fresh single-statement read; no explicit transaction or shared authorization cache. */
+    @org.springframework.data.jpa.repository.Query("select u from User u where u.id = :id")
+    Optional<User> findAccountState(@org.springframework.data.repository.query.Param("id") UUID id);
+
     @org.springframework.data.jpa.repository.Lock(jakarta.persistence.LockModeType.PESSIMISTIC_WRITE)
     @org.springframework.data.jpa.repository.Query("select u from User u where u.id = :id")
     Optional<User> findForUpdate(@org.springframework.data.repository.query.Param("id") UUID id);

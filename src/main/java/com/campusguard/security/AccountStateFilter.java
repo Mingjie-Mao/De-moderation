@@ -54,6 +54,8 @@ import org.springframework.web.filter.OncePerRequestFilter;
  */
 public class AccountStateFilter extends OncePerRequestFilter {
 
+    public static final String VALIDATED_PROFILE = "campusguard.security.validatedProfile";
+
     private final UserRepository users;
 
     public AccountStateFilter(UserRepository users) {
@@ -68,7 +70,7 @@ public class AccountStateFilter extends OncePerRequestFilter {
         Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
 
         if (authentication instanceof JwtAuthenticationToken token) {
-            SecurityContextHolder.getContext().setAuthentication(revalidate(token));
+            SecurityContextHolder.getContext().setAuthentication(revalidate(token, request));
         }
 
         chain.doFilter(request, response);
@@ -80,7 +82,7 @@ public class AccountStateFilter extends OncePerRequestFilter {
      * act, and saying which would tell an unauthenticated caller whether a given
      * id ever existed.
      */
-    private Authentication revalidate(JwtAuthenticationToken token) {
+    private Authentication revalidate(JwtAuthenticationToken token, HttpServletRequest request) {
         Jwt jwt = token.getToken();
         UUID id;
         try {
@@ -90,7 +92,7 @@ public class AccountStateFilter extends OncePerRequestFilter {
         }
 
         User user = Optional.of(id)
-                .flatMap(users::findById)
+                .flatMap(users::findAccountState)
                 .filter(candidate -> candidate.getStatus() == UserStatus.ACTIVE)
                 .orElseThrow(() -> new InvalidBearerTokenException(
                         "This account can no longer act. Sign in again."));
@@ -100,6 +102,9 @@ public class AccountStateFilter extends OncePerRequestFilter {
         if (tokenVersion != user.getTokenVersion()) {
             throw new InvalidBearerTokenException("This session has ended. Sign in again.");
         }
+
+        // Immutable and request-scoped; the next request still rechecks bans and revocation.
+        request.setAttribute(VALIDATED_PROFILE, com.campusguard.user.MyProfileView.of(user));
 
         List<GrantedAuthority> current =
                 List.of(new SimpleGrantedAuthority("ROLE_" + user.getRole().name()));

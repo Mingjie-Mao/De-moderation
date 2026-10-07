@@ -6,6 +6,9 @@ server response. Votes display a pending optimistic preview immediately; success
 reconciles it with server state and failure removes it and triggers a re-read.
 Forum/thread screens refresh from the API; fresh loaded comments and their cursor
 can be reused for 15 seconds when returning to the same thread.
+Author pages use `GET /api/posts/authors/{authorId}?size=30&cursor=…` to read one
+bounded page across all forums. The endpoint returns the same `FeedPage` shape
+as the forum feed, excludes removed posts, and requires no JWT for public content.
 
 ## Authentication
 
@@ -29,9 +32,10 @@ the old Render default migrate once; custom hosts and a later explicit rollback
 are preserved.
 Admin selection instead requires real `POST /api/auth/login` credentials and
 verifies `GET /api/users/me` reports an active `ADMIN`. Passwords are not saved.
-Administrator access and rotating refresh tokens live in process memory: a
-process restart, sign-out, invalid refresh or API-origin change requires login
-again. Concurrent expired requests share a single refresh; network/5xx failures
+Android stores Member and Admin sessions separately using Keystore AES-GCM in
+`noBackupFilesDir`; a process restart restores the selected session without
+resending the password. Sign-out, invalid refresh or an API-origin change clears
+the corresponding session. Concurrent expired requests share a single refresh; network/5xx failures
 preserve the session, and a 403 is never treated as access-token expiry.
 
 The in-app administrator workspace and browser console use the same case,
@@ -42,6 +46,9 @@ uses the real server user id and the same rotating session for forum, profile
 and notification calls; an ended admin session never falls back to a generated
 member identity.
 Password-reset email is disabled in the public demo.
+`GET /api/users/me` reuses the immutable profile read by account validation in
+the same request; it does not cache authorization across requests. Each new
+authenticated request still checks the database for bans, roles and revocation.
 
 ## Forum and media flow
 
@@ -79,6 +86,14 @@ The case detail response exposes it as `content`, with `currentContent` and
 `/api/admin/moderation-cases/{caseId}/media/{mediaId}` and requires an admin
 bearer token.
 
+Case queue responses also include `contentTitle` (up to 120 code points),
+`contentPreview` (up to 180 code points) and `hasAttachment`. Ellipses may add one
+character. These describe the frozen reported version; cases predating snapshots
+use current content, including removed items, fetched in at most two batch queries
+per page. Android shows content and localized status in the queue; model advice
+is available in the detail view. Missing previews do not trigger a detail request
+for every row. This change needs no database migration.
+
 The affected author can appeal a resolved `HIDE`, `DELETE` or `BAN` action with
 `POST /api/appeals`. Only one pending appeal per author/case is allowed. Admins
 process appeals in the app or web console; an overturn revises the original case to
@@ -110,6 +125,7 @@ All routes below require the signed-in account's JWT; the actor ID is never take
 | `GET /api/community/posts?kind=LIKED\|BOOKMARKED` | Current account's collection, most recently liked/saved first (`savedAt`); opaque `nextCursor` and size 1–100; hidden/deleted posts excluded |
 | `GET /api/community/users/{id}/comments?size=30&cursor=…` | Public authored comments, newest first, with parent post metadata; opaque `nextCursor`, size 1–100; hidden/deleted threads excluded |
 | `GET /api/community/users/{id}/following` or `/followers` | Real relation list, newest relation first (`since`); suspended/banned accounts are omitted here and from follower counts; opaque `nextCursor`, size 1–100 |
+| `POST /api/translations` | Signed-in only. `language` (`zh-CN` or `en`), `postIds` (≤50), `commentIds` (≤100). Returns cached machine translations of live posts (`title`, `body`) and comments (`body`); text already in that language is omitted. Missing translations run in a bounded background queue: HTTP does not wait for the model. `pending=true` means show the original and poll later (Android uses five seconds and bounded retries). Concurrent readers share the same job; cached reads and polls for an existing job do not consume the per-account model-call budget. Results are shared per language and source hash, invalidated by author edits. Translations are display-only: reports and moderation always use the original. |
 | `GET /api/market` | Activity-based quotes, five-minute candles with `source`, and current account's portfolio |
 | `POST /api/market/trades` | `requestId` UUID, `forumKey`, `action` (`BUY`, `SELL`, `OPEN_SHORT`, `CLOSE_SHORT`), `units` 1–10000, `expectedPrice` |
 | `GET /api/market/trades` | Current account's immutable ledger, UUID cursor and size 1–100 |

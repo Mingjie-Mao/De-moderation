@@ -294,10 +294,10 @@ export default function Home() {
 
   return <main className="app-shell">
     <aside className="sidebar"><div className="brand-mark">D</div><nav aria-label="主导航">
-      <button className={`nav-item ${tab==='queue'?'active':''}`} onClick={()=>{setTab('queue');setPage(0);setDetail(null);}}>队</button>
-      <button className={`nav-item ${tab==='resolved'?'active':''}`} onClick={()=>{setTab('resolved');setPage(0);setDetail(null);}}>录</button>
-      <button className={`nav-item ${tab==='appeals'?'active':''}`} onClick={()=>{setTab('appeals');setPage(0);setDetail(null);}}>诉</button>
-    </nav><button className="profile-dot" title="退出登录" onClick={logout}>{session.username.slice(0,1).toUpperCase()}</button></aside>
+      <button className={`nav-item ${tab==='queue'?'active':''}`} aria-current={tab==='queue'?'page':undefined} onClick={()=>{setTab('queue');setPage(0);setDetail(null);}}>审核工作台</button>
+      <button className={`nav-item ${tab==='resolved'?'active':''}`} aria-current={tab==='resolved'?'page':undefined} onClick={()=>{setTab('resolved');setPage(0);setDetail(null);}}>裁决记录</button>
+      <button className={`nav-item ${tab==='appeals'?'active':''}`} aria-current={tab==='appeals'?'page':undefined} onClick={()=>{setTab('appeals');setPage(0);setDetail(null);}}>申诉中心</button>
+    </nav><button className="nav-item sidebar-logout" onClick={logout}>退出登录</button></aside>
     <section className="workspace">
       <header className="topbar"><div><p className="eyebrow">CampusGuard / De-Moderation</p><h1>{tab==='queue'?'审核工作台':tab==='resolved'?'裁决记录':'申诉中心'}</h1></div>
         <div className={`engine-pill ${engine?.llmActive?'':'fallback'}`}><span />{engine?.llmActive?`${engine.activeEngine} 正常运行`:`当前使用 ${engine?.activeEngine||'规则引擎'}`}</div></header>

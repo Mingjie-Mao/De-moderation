@@ -1,20 +1,20 @@
 # Northflank demo deployment
 
-Accepted on 2026-10-05. Project `de-moderation-demo`, service
+Current snapshot: 2026-10-07, V18. Initial migration accepted on 2026-10-05. Project `de-moderation-demo`, service
 `de-moderation-api`, Northflank Free, US Central (Council Bluffs), one instance,
 0.2 shared vCPU / 512 MB. Startup, readiness and liveness passed; zero restarts
 were observed at acceptance.
 
 - API: [https://p01--de-moderation-api--z48dx52bgz5k.code.run](https://p01--de-moderation-api--z48dx52bgz5k.code.run)
 - Admin: [existing Pages site](https://de-moderation-review-demo.pages.dev/)
-- Database: existing Neon PostgreSQL 18 in Sydney, schema V15.
+- Database: existing Neon PostgreSQL 18 in Sydney, schema V18.
 - Media: existing private R2 bucket and `render-production/media/` prefix.
-- Render: retained at https://de-moderation-api-demo.onrender.com for rollback.
+- Render: historical V14 backup at https://de-moderation-api-demo.onrender.com; it is not API-compatible with every feature of the current app.
 
 ## Image and configuration
 
 ```text
-ghcr.io/mingjie-mao/de-moderation-backend@sha256:c43500ead249d5878673fd313c96b7873a628a9946b2896e83888f7b6dfcbaaa
+ghcr.io/mingjie-mao/de-moderation-backend@sha256:ca65213278b8432d5c82ff17689f752dc0bb7b3284457f1854e7c6cbddf0b24b
 ```
 
 The private registry credential is restricted to read access and this project.
@@ -36,12 +36,12 @@ not a health probe.
 Reports trigger the worker after their transaction commits. A bounded executor
 coalesces duplicate wake-up hints; durable database claims prevent lost cases.
 Recovery polling is 30 minutes, so missed hints/stalled claims can wait up to
-that interval. Hikari minimum idle is zero, idle timeout 60 seconds and keepalive
+that interval. Hikari minimum idle is zero, idle timeout 600 seconds and keepalive
 zero. This permits database suspension between requests; continuous traffic and
 an awake Render replica can still consume Neon compute. Media sweeping and mail
 remain disabled for this demo.
 
-## Acceptance
+## Initial migration acceptance (2026-10-05, historical)
 
 - Real Member `1234` / `1234` and Admin `12345` / `12345` logins passed.
 - Member access to administrator cases returned 403; administrator access 200.
@@ -62,7 +62,7 @@ remain disabled for this demo.
 
 Sanitized live workflow evidence is in `verification.json`.
 
-## Measured warm latency
+## Historical warm latency (2026-10-05, before V18)
 
 Sydney client, existing Sydney database, reused HTTPS connection, median of
 three sequential samples per endpoint (before the queue-only image update).
@@ -81,7 +81,12 @@ were slightly slower across the US Central–Sydney link. Market still takes
 several seconds due to multiple database round trips; this migration does not
 make every interaction instant. An idle Neon database can still need to resume.
 
-## Rollback
+## Rollback compatibility
+
+The retained V14 Render image lacks newer V16–V18 APIs. Verify a compatible image,
+client feature set and migration history before changing either client origin.
+The following procedure describes the original migration rollback, not an
+automatically compatible fallback for today’s app.
 
 Retain the original Render image/configuration. Set Android's backend URL to
 `https://de-moderation-api-demo.onrender.com` explicitly, and rebuild/deploy
@@ -141,7 +146,7 @@ reset runs during application startup. Private generated passwords and row mappi
 remain in ignored local files. This update does not add mail, monitoring or backup
 services and does not require a new database, bucket or credentials.
 
-## Account settings and session update prepared (2026-10-07, NOT deployed)
+## Historical V16 preparation (2026-10-07, superseded by deployment below)
 
 V16 adds account-owned avatars and private language/theme settings. Android stores
 rotating sessions in Keystore-encrypted atomic files excluded from backups and
@@ -155,13 +160,14 @@ and 19 distinct device checks (including a real process force-stop/restart).
 The final APK is now also installed on user emulator-5556. Two opt-in live device
 checks passed: real member/admin encrypted session persistence, then force-stop
 and restore in a new process with real profile/post reads and no credential resend.
-Restore was rechecked successfully after the diagnostic restart. Current public
-API still runs V15; preference synchronization is not deployed.
+Restore was rechecked successfully after the diagnostic restart. At that preparation checkpoint the public API was V15. V16 preferences have
+since been deployed; the current service runs V18.
 
 Local deployment image:
 ghcr.io/mingjie-mao/de-moderation-backend:account-settings-20261007.
 Three registry push attempts failed because macOS Keychain could not supply the
-existing GHCR credential (OSStatus -25293). Restore that login, push this image,
+existing GHCR credential (OSStatus -25293). The memory-only publisher later resolved this upload without modifying Keychain.
+The original pre-release plan was to restore that login, push this image,
 pin its registry digest on the existing service, apply the runtime pool settings,
 verify V16/probes/real R2 avatar access, then upgrade the user APK. No Git commit
 or Git push has been performed.
@@ -192,7 +198,7 @@ This incident is not evidence of the earlier occasional timeout root cause.
 
 The registry credential failure above described the pre-release state. The
 prepared image was subsequently published with a memory-only credential helper;
-see the V16 acceptance below for the current deployment.
+see the V16 acceptance below for that release; the current snapshot is V18.
 
 
 ## V16 deployed and accepted (2026-10-07)
@@ -243,3 +249,92 @@ pre-release measurements, Market improved only about 2.3%; comments were similar
 and some other endpoints were slightly slower. This small sample does not prove
 uniform latency improvement or resolution of historical intermittent timeouts.
 Request IDs and slow-request logging are now active for correlation.
+
+## V17 translation rollout (2026-10-07)
+
+The user published `translation-reliability-20261007` through the memory-only
+GHCR helper. Northflank verified the existing read-only registry integration and
+the service was updated to this pinned digest:
+
+```text
+ghcr.io/mingjie-mao/de-moderation-backend@sha256:da78d3b2ed1af403001e9819adef43f5a8be39cd17798281078db676881c1d4b
+```
+
+Rollout started at 14:46:48 Australia/Sydney. Deployment
+`de-moderation-api-77f4d574fb`, pod `de-moderation-api-77f4d574fb-vxx9l`.
+Flyway validated 17 migrations and applied V17 at 14:48:30, creating the
+translation cache table. The service retains its existing Hikari arguments,
+Neon database, Gemini configuration and private R2 store.
+
+Cache misses now run in one background worker with at most eight waiting
+batches. Readers get cached translations and a `pending` flag without waiting
+for the model. Concurrent reads of the same source hash share one job; model
+work does not hold a database connection. Moderation continues to use original
+content. See De-discussion's `docs/translation-reliability.zh-CN.md` for local
+tests, device restoration and latency evidence. No Git commit or push was
+performed for this rollout.
+
+### V17 acceptance
+
+The application started at 14:49:48 Australia/Sydney (149.898 seconds).
+Startup/readiness/liveness all returned 200 by 14:50:52; the new pod had zero
+restarts. The translated reading API returned 200, replacing the previous 404.
+One existing English post and comment were translated into Chinese by the
+configured Gemini provider. The cache miss returned `pending=true` in 1602 ms;
+the next poll read the completed result, and the cached read took 1338 ms.
+
+The installed Android app passed its selected-account restoration test in a new
+process against V17 (4.847 seconds, no password resend). Eleven live checks passed
+for both account roles, administrator access control, existing ANU posts, private
+R2 image bytes, market reads and leaderboard. Thirty-eight post-release timing
+requests returned 200 without timeouts; medians were 1046 ms for feed, 1203 ms for
+comments, 1922 ms for market and 1169 ms for leaderboard. The first login after
+restart took 5034 ms. These samples do not establish a general latency improvement
+or resolve the historical intermittent timeout root cause; the bounded async
+translation fix specifically removes waiting on the model from the HTTP path.
+
+
+## V18 review content and latency rollout (2026-10-07)
+
+Pinned published image:
+
+```text
+ghcr.io/mingjie-mao/de-moderation-backend@sha256:ca65213278b8432d5c82ff17689f752dc0bb7b3284457f1854e7c6cbddf0b24b
+```
+
+Deployment `de-moderation-api-7668868c44`, pod
+`de-moderation-api-7668868c44-lp2xd`, has 3/3 passing health checks.
+Flyway applied V18 at 16:49:14 Australia/Sydney. V18 adds only the partial
+index for author cursor pagination. Existing database, R2 and pool settings
+were retained. Review queue responses now include bounded report-time content
+summaries, with batched fallback reads for older cases.
+
+Five before/after samples per read gave medians: profile 962 -> 423 ms,
+public feed 590 -> 464 ms, personal posts 2354 -> 402 ms, comments 797 -> 802 ms.
+Personal posts previously summed four sequential forum reads; the new path is
+one bounded author request. These are small diagnostic samples, not p95 or a
+stability guarantee. All 25 recorded post-release requests returned 200.
+First Member login after startup took 5812 ms; two subsequent logins took
+2589/2008 ms. Cross-region latency and historical intermittent timeouts remain
+limitations; comment first-load latency did not improve in this sample.
+
+The updated user APK was installed without clearing data. Both real-server
+instrumented tests passed: selected-account restoration after process stop and
+actual review content/status without UUID/model debug metadata in list cards.
+23 targeted backend tests, 71 Android unit tests and five isolated device
+scenarios also passed. No Git commit or Git push was performed.
+
+
+## Current complete regression (2026-10-07)
+
+The V18 runtime passed full default Maven verification and separate real R2/model
+checks: 418 distinct test methods passed; two opt-in real investigation checks
+were not run because the public demo keeps that feature disabled. Android passed
+71 unit and 26 device methods; Debug Lint has zero errors and 283 warnings.
+The final APK includes a startup/resume session-revocation race fix and was
+installed preserving user data. Pages lint, type checking, static build and live
+queue/detail/audit reads passed. A dedicated QA post completed real Gemini review,
+human hide, appeal restoration and audit; it was soft-deleted afterwards.
+No new backend rollout was required for these Android/test/doc changes.
+See [the full record](../../docs/current-regression.zh-CN.md) for scope, warnings,
+separate default/external counts and reproducibility. No Git commit or push.

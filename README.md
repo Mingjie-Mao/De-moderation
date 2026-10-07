@@ -11,6 +11,8 @@
 - [管理员审核工作台](https://de-moderation-review-demo.pages.dev/)
 - 后端 API：<https://p01--de-moderation-api--z48dx52bgz5k.code.run>
 
+当前线上数据库版本为 V18。账号设置与加密会话恢复、后台翻译及审核内容摘要已上线。后端在美国中部、数据库在悉尼，实测存在网络等待；最新验证见[当前回归记录](docs/current-regression.zh-CN.md)。
+
 Android 论坛、App 内管理员审核与管理网页共用同一个后端。普通用户通过 App 注册和登录，帖子、评论与图片写入真实数据库和存储桶。App 选择 Admin 后需登录服务器管理员账号，可处理案件、模型建议、申诉与审计。
 
 ## Features
@@ -113,4 +115,5 @@ mvn verify
 - [Reliability](docs/reliability.md)
 - [Security](docs/security-decisions.md)
 - [Demo Deployment](docs/production-runbook.md)
+- [Current Regression](docs/current-regression.zh-CN.md)
 - [Full Project Report](docs/backend-project-report.zh-CN.md)

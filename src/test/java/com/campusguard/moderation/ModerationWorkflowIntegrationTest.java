@@ -78,11 +78,8 @@ class ModerationWorkflowIntegrationTest extends AbstractIntegrationTest {
         // workflow exists to enforce.
         mockMvc.perform(get("/api/posts/{id}", postId)).andExpect(status().isOk());
 
-        mockMvc.perform(get("/api/admin/moderation-cases")
-                        .header("Authorization", bearer(admin))
-                        .param("status", "AWAITING_REVIEW"))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$[?(@.id=='" + judged.getId() + "')]").exists());
+        assertThat(reviewQueueEntry(admin, CaseStatus.AWAITING_REVIEW, judged.getId())
+                .path("id").asText()).isEqualTo(judged.getId().toString());
 
         mockMvc.perform(post("/api/admin/moderation-cases/{id}/decision", judged.getId())
                         .header("Authorization", bearer(admin))

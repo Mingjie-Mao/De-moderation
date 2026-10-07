@@ -36,9 +36,23 @@ public record ModerationCaseView(
         UUID assignedTo,
         Instant assignedAt,
         Instant reviewDueAt,
-        Instant createdAt) {
+        Instant createdAt,
+        String contentTitle,
+        String contentPreview,
+        boolean hasAttachment) {
 
     public static ModerationCaseView of(ModerationCase source) {
+        return of(source, null);
+    }
+
+    public static ModerationCaseView of(ModerationCase source, com.campusguard.moderation.ContentLocator.ContentPreview fallback) {
+        var reported = source.reportedContent();
+        String title = reported.map(item -> item.title() == null ? "" : item.title())
+                .orElse(fallback == null ? "" : fallback.title());
+        String body = reported.map(item -> item.body() == null ? "" : item.body())
+                .orElse(fallback == null ? "" : fallback.body());
+        boolean attachment = reported.map(item -> item.mediaId() != null)
+                .orElse(fallback != null && fallback.hasAttachment());
         return new ModerationCaseView(
                 source.getId(),
                 source.getTargetType(),
@@ -57,6 +71,13 @@ public record ModerationCaseView(
                 source.getAssignedTo() == null ? null : source.getAssignedTo().getId(),
                 source.getAssignedAt(),
                 source.getReviewDueAt(),
-                source.getCreatedAt());
+                source.getCreatedAt(), excerpt(title, 120), excerpt(body, 180), attachment);
+    }
+
+    private static String excerpt(String value, int limit) {
+        if (value == null) return "";
+        String compact = value.replaceAll("\\s+", " ").strip();
+        int count = compact.codePointCount(0, compact.length());
+        return count <= limit ? compact : compact.substring(0, compact.offsetByCodePoints(0, limit)) + "…";
     }
 }

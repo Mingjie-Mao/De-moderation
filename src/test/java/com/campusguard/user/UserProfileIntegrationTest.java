@@ -11,6 +11,19 @@ import org.junit.jupiter.api.Test;
 import org.springframework.http.MediaType;
 
 class UserProfileIntegrationTest extends AbstractIntegrationTest {
+    @Test void aFreshRequestSeesUpdatedProfileAndRevokedAccountImmediately() throws Exception {
+        User user = newUser();
+        String token = bearer(user);
+        mockMvc.perform(get("/api/users/me").header("Authorization", token))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.passwordHash").doesNotExist());
+        user.updateProfile("Changed after first request", "New bio");
+        userRepository.saveAndFlush(user);
+        mockMvc.perform(get("/api/users/me").header("Authorization", token))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.displayName").value("Changed after first request"));
+        user.ban(); userRepository.saveAndFlush(user);
+        mockMvc.perform(get("/api/users/me").header("Authorization", token)).andExpect(status().isUnauthorized());
+        mockMvc.perform(get("/api/users/me")).andExpect(status().isUnauthorized());
+    }
     @org.springframework.beans.factory.annotation.Autowired
     com.campusguard.media.MediaObjectRepository repository;
 

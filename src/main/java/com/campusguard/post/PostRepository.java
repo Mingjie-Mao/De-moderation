@@ -13,6 +13,34 @@ import jakarta.persistence.LockModeType;
 
 public interface PostRepository extends JpaRepository<Post, UUID> {
 
+    interface Preview {
+        UUID getId();
+        String getTitle();
+        String getBody();
+        UUID getMediaId();
+    }
+
+    /** Legacy moderation cases without a frozen snapshot; includes removed content. */
+    @Query("select p.id as id, p.title as title, p.body as body, m.id as mediaId from Post p left join p.media m where p.id in :ids")
+    List<Preview> findModerationPreviews(@Param("ids") List<UUID> ids);
+
+    /** One bounded page across all forums, rather than scanning every forum on the client. */
+    @Query("""
+            select p from Post p join fetch p.author left join fetch p.media
+            where p.author.id = :authorId and p.deletedAt is null
+            order by p.createdAt desc, p.id desc
+            """)
+    List<Post> findAuthorFirstPage(@Param("authorId") UUID authorId, Pageable pageable);
+
+    @Query("""
+            select p from Post p join fetch p.author left join fetch p.media
+            where p.author.id = :authorId and p.deletedAt is null
+              and (p.createdAt < :beforeCreatedAt or (p.createdAt = :beforeCreatedAt and p.id < :beforeId))
+            order by p.createdAt desc, p.id desc
+            """)
+    List<Post> findAuthorAfter(@Param("authorId") UUID authorId,
+            @Param("beforeCreatedAt") Instant beforeCreatedAt, @Param("beforeId") UUID beforeId, Pageable pageable);
+
     /**
      * The feed. Written out rather than derived because the author has to be
      * fetched in the same round trip: rendering a feed of N posts through a lazy

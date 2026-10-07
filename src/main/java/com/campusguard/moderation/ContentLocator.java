@@ -109,6 +109,21 @@ public class ContentLocator {
     public record TargetRef(TargetType type, UUID id) {
     }
 
+    public record ContentPreview(String title, String body, boolean hasAttachment) {}
+
+    /** At most two queries for a bounded queue page, never one detail query per row. */
+    @Transactional(readOnly = true)
+    public java.util.Map<TargetRef, ContentPreview> previewsIncludingRemoved(List<TargetRef> targets) {
+        var previews = new java.util.HashMap<TargetRef, ContentPreview>();
+        var posts = targets.stream().filter(t -> t.type() == TargetType.POST).map(TargetRef::id).distinct().toList();
+        var comments = targets.stream().filter(t -> t.type() == TargetType.COMMENT).map(TargetRef::id).distinct().toList();
+        if (!posts.isEmpty()) postRepository.findModerationPreviews(posts).forEach(p -> previews.put(
+                new TargetRef(TargetType.POST, p.getId()), new ContentPreview(p.getTitle(), p.getBody(), p.getMediaId() != null)));
+        if (!comments.isEmpty()) commentRepository.findModerationPreviews(comments).forEach(c -> previews.put(
+                new TargetRef(TargetType.COMMENT, c.getId()), new ContentPreview("", c.getBody(), c.getMediaId() != null)));
+        return previews;
+    }
+
     /**
      * Soft-delete the target.
      *

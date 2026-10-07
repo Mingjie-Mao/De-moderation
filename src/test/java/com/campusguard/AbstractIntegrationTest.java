@@ -5,6 +5,8 @@ import com.campusguard.user.User;
 import com.campusguard.user.UserRepository;
 import com.campusguard.user.UserRole;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.campusguard.moderation.CaseStatus;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
@@ -159,5 +161,27 @@ public abstract class AbstractIntegrationTest {
 
     protected String json(Object value) throws Exception {
         return objectMapper.writeValueAsString(value);
+    }
+
+    /** The shared suite can contain more cases than the first review page. */
+    protected JsonNode reviewQueueEntry(User admin, CaseStatus status, UUID caseId) throws Exception {
+        for (int page = 0; page < 100; page++) {
+            String response = mockMvc.perform(
+                            org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get(
+                                    "/api/admin/moderation-cases")
+                                    .header("Authorization", bearer(admin))
+                                    .param("status", status.name())
+                                    .param("size", "30")
+                                    .param("page", Integer.toString(page)))
+                    .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.status().isOk())
+                    .andReturn().getResponse().getContentAsString();
+            JsonNode rows = objectMapper.readTree(response);
+            org.assertj.core.api.Assertions.assertThat(rows.size()).isLessThanOrEqualTo(30);
+            for (JsonNode row : rows) {
+                if (row.path("id").asText().equals(caseId.toString())) return row;
+            }
+            if (rows.size() < 30) break;
+        }
+        throw new AssertionError("Case not found in paged review queue: " + caseId);
     }
 }

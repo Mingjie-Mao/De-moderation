@@ -23,8 +23,9 @@ public class UserController {
     }
 
     @GetMapping("/me")
-    public MyProfileView me(@AuthenticationPrincipal Jwt jwt) {
-        return service.me(AuthenticatedUser.idOf(jwt));
+    public MyProfileView me(@org.springframework.web.bind.annotation.RequestAttribute(
+            com.campusguard.security.AccountStateFilter.VALIDATED_PROFILE) MyProfileView profile) {
+        return profile;
     }
 
     @PatchMapping("/me")

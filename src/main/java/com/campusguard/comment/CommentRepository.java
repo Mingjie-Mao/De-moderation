@@ -13,6 +13,15 @@ import jakarta.persistence.LockModeType;
 
 public interface CommentRepository extends JpaRepository<Comment, UUID> {
 
+    interface Preview {
+        UUID getId();
+        String getBody();
+        UUID getMediaId();
+    }
+
+    @Query("select c.id as id, c.body as body, m.id as mediaId from Comment c left join c.media m where c.id in :ids")
+    List<Preview> findModerationPreviews(@Param("ids") List<UUID> ids);
+
     /** Every returned row is bounded by the page size, including replies. */
     @Query("""
             select c from Comment c

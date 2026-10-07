@@ -21,8 +21,7 @@ For an LLM demonstration, configure `AI_CHAT_MODEL`, `GEMINI_API_KEY`,
 For the public demo, open readiness ahead of time to allow for a cold start.
 
 Have open: Swagger UI, and a terminal on the application log.
-Also start `admin-web` with `npm run dev` and open `http://localhost:3000` for
-the human-review steps.
+For the deployed interview demo, open the [browser reviewer console](https://de-moderation-review-demo.pages.dev/) or the App’s real Admin workspace. The API commands below are for an isolated local backend; do not mix local target IDs with the online console. For an entirely local rehearsal, use the local Swagger administrator routes.
 
 ## 1 — It is an ordinary HTTP API (30s)
 
@@ -66,7 +65,7 @@ a check in application code.
 
 ## 3 — The queue moves on its own (20s)
 
-Show the log picking the case up within a poll. Say what the query is:
+Show the log picking the case up after the report’s transaction-commit wake-up; recovery polling also rescues missed hints. Say what the query is:
 `SELECT ... FOR UPDATE SKIP LOCKED`, so a second instance takes different rows
 instead of queueing behind the first, and the claim commits before analysis
 starts so row locks are not held across a model call.

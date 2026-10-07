@@ -80,6 +80,12 @@ class CaseEvidenceIntegrationTest extends AbstractIntegrationTest {
         assertThat(cases.findById(caseId).orElseThrow().getDecision())
                 .isEqualTo(ModerationDecision.REMOVE);
 
+        // Queue cards must show the reported version, even after the author edits it.
+        var queueEntry = reviewQueueEntry(admin, CaseStatus.AWAITING_REVIEW, caseId);
+        assertThat(queueEntry.path("contentTitle").asText()).isEqualTo("Original title");
+        assertThat(queueEntry.path("contentPreview").asText()).isEqualTo("You are an idiot");
+        assertThat(queueEntry.path("hasAttachment").asBoolean()).isTrue();
+
         String detail = mockMvc.perform(get("/api/admin/moderation-cases/{id}", caseId)
                         .header("Authorization", bearer(admin)))
                 .andExpect(status().isOk())

@@ -3,10 +3,14 @@
 
 # De-Moderation 后端项目报告
 
-> 更新时间：2026 年 10 月 3 日
+> 更新时间：2026 年 10 月 7 日
 > 仓库：`De-moderation`
-> 分支：`codex/moderation-hardening`（改动未提交）
+> 分支：Desktop `main` 工作区（改动未提交）
 > 报告范围：后端、数据库、AI 审核、管理员网页、核心测试和面试演示
+
+## 当前状态（2026-10-07）
+
+线上数据库已到 V18；账号设置同步、加密会话恢复、后台翻译和内容优先的审核列表均已部署。后端仍在美国中部，数据库在悉尼。最新回归与剩余限制见[当前验收](current-regression.zh-CN.md)。下方带日期的测试数和测量保留为历史记录。
 
 ## Northflank 迁移验收（2026-10-05）
 
@@ -35,7 +39,7 @@ De-Moderation 是校园论坛 `De-discussion` 的后端和内容审核系统。A
 - 后端 API：`https://p01--de-moderation-api--z48dx52bgz5k.code.run`
 - 健康检查：`https://p01--de-moderation-api--z48dx52bgz5k.code.run/actuator/health/readiness`
 
-本项目按简历与面试演示维护。真实 Gemini 调用、S3 媒体持久化、V13 迁移、评论分页和管理端会话已验证。独立云监控、Resend 接入、定时备份/桶复制框架、Kubernetes 和告警部署配置已精简移除；这些不作为项目完成的前置条件。保留基本健康检查、日志、CI 和按需执行的手动备份/恢复。最新部署步骤见 [演示部署指南](production-runbook.md)。
+本项目按简历与面试演示维护。真实 Gemini 调用、S3 媒体持久化、V18 迁移、评论分页和管理端会话已验证。独立云监控、Resend 接入、定时备份/桶复制框架、Kubernetes 和告警部署配置已精简移除；这些不作为项目完成的前置条件。保留基本健康检查、日志、CI 和按需执行的手动备份/恢复。最新部署步骤见 [演示部署指南](production-runbook.md)。
 
 ## 2. System Architecture
 
@@ -278,7 +282,7 @@ JWT 密钥没有默认值且至少 32 字节，没有配置时程序直接启动
 | Media sweep | 孤儿扫描会删除什么，以及——真正要紧的断言——它拒绝删除什么 |
 | Case investigation | 工具白名单、只读事务、步数预算、引用校验、共享熔断、端点权限与限流，以及工具调用适配器本身 |
 | Evaluation harness | 成对评分、多次运行离散度、答案不稳定，以及留出集自身的不变量 |
-| Database and API policy | Flyway V1–V13、Actuator、Swagger、N+1 查询数量 |
+| Database and API policy | Flyway V1–V18、Actuator、Swagger、N+1 查询数量 |
 
 当前 S3 后端通过 Testcontainers 对 S3Mock 测试，验证上传、读取、删除和列举等契约；它不能证明部署所用服务商对 region 和 path-style 寻址的兼容性。配置 `MEDIA_S3_BUCKET` 后，真实桶契约测试会对部署自己的存储桶运行。当前测试使用 `adobe/s3mock:4.7.0`，公开演示使用 R2；模拟服务与真实桶是两个验证层次。
 
@@ -314,7 +318,7 @@ Neon PostgreSQL
 |---|---|
 | Admin web | Cloudflare Pages HTTPS，公开可访问 |
 | Backend | Northflank 免费 Docker 实例，readiness 为 `UP` |
-| Database | Neon 托管 PostgreSQL，已迁移至 V13 |
+| Database | Neon 托管 PostgreSQL，位于悉尼，已迁移至 V18 |
 | AI | Gemini v2 正常，`keyword-v1` 兜底 |
 | Secrets | 本地 `.env` 被 Git 忽略；云端使用平台环境变量 |
 | CI | 后端 verify、Docker build、网页 lint/build |
@@ -380,6 +384,11 @@ Neon PostgreSQL
 | V11 | case evidence snapshot | 保存举报时文本、作者和图片，防止后续编辑替换证据 |
 | V12 | investigation lease | 在模型调用前占用案件，防止调查重复触发并允许崩溃后过期恢复 |
 | V13 | comment page index | 对帖子全部可见评论和回复的 keyset 分页建立部分索引 |
+| V14 | community and virtual market | 社交关系、钱包、交易幂等、行情与排行榜 |
+| V15 | forum presentation and demo provenance | 分类、置顶与导入数据来源标记 |
+| V16 | account preferences and avatar | 头像媒体归属、语言与主题同步 |
+| V17 | content translations | 按源内容哈希保存翻译缓存 |
+| V18 | authored posts cursor index | 跨论坛作者帖子游标分页部分索引 |
 
 `reports.target_id` 和 `moderation_cases.target_id` 可以指帖子或评论，无法同时建立两个数据库外键，因此写入时由服务层验证目标。`audit_log.actor_id` 不设用户外键，保证账号删除后审计仍然存在。AI 原始回答和审计 payload 使用 JSONB，以适应不同动作的数据结构。
 

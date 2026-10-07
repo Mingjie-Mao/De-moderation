@@ -89,6 +89,7 @@ public class SecurityConfig {
                         // keeps a future write endpoint from inheriting public
                         // access by accident.
                         .requestMatchers(HttpMethod.GET, "/api/posts").permitAll()
+                        .requestMatchers(HttpMethod.GET, "/api/posts/authors/*").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/posts/*").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/posts/*/comments").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/media/*").permitAll()

@@ -3,12 +3,16 @@
 
 # De-Moderation Backend Project Report
 
-> Updated: 3 October 2026
+> Updated: 7 October 2026
 > Repository: `De-moderation`
-> Branch: `codex/moderation-hardening` (uncommitted changes)
+> Branch: Desktop `main` working tree (uncommitted changes)
 > Scope: backend, database, AI moderation, admin web, core testing and interview demonstration
 
-## Northflank acceptance (2026-10-05)
+## Current status (2026-10-07)
+
+The live schema is V18. Encrypted Android session restoration, persisted avatar/language/theme settings, asynchronous translations and content-first review cards are deployed. The backend remains US Central and the database Sydney. Current acceptance and remaining limits are in [the regression record](current-regression.zh-CN.md). Dated measurements below remain historical evidence.
+
+## Initial Northflank acceptance (2026-10-05)
 
 The current demo uses the original Neon database and R2 bucket. Real member and administrator logins, 11 ANU posts, Gemini advice, human review and audit were verified through the new API. The Pages site was redeployed, and both accounts loaded the 11 live posts in an Android emulator smoke test. Full migration evidence and warm latency limitations are in [the deployment notes](../deploy/northflank/README.md).
 
@@ -35,7 +39,7 @@ Public endpoints:
 - Backend API: `https://p01--de-moderation-api--z48dx52bgz5k.code.run`
 - Readiness check: `https://p01--de-moderation-api--z48dx52bgz5k.code.run/actuator/health/readiness`
 
-This project is maintained as a resume/interview demo. Real Gemini calls, S3 media persistence, V13 migrations, bounded comment paging and admin sessions have been verified. Independent cloud monitoring, Resend delivery, scheduled backup/bucket replication, Kubernetes and alerting deployment assets have been removed to reduce maintenance. Basic health checks, logs, CI and manual backup/restore remain. See the [demo deployment guide](production-runbook.md) for the current setup.
+This project is maintained as a resume/interview demo. Real Gemini calls, S3 media persistence, V18 migrations, bounded comment paging and admin sessions have been verified. Independent cloud monitoring, Resend delivery, scheduled backup/bucket replication, Kubernetes and alerting deployment assets have been removed to reduce maintenance. Basic health checks, logs, CI and manual backup/restore remain. See the [demo deployment guide](production-runbook.md) for the current setup.
 
 ## 2. System Architecture
 
@@ -278,7 +282,7 @@ Integration tests use Testcontainers with real PostgreSQL 16 rather than H2. The
 | Media sweep | What the orphan sweep deletes, and — the assertions that matter — what it refuses to delete |
 | Case investigation | Tool whitelist, read-only transactions, the step budget, citation checking, the shared circuit, endpoint access and limits, and the tool-calling adapter itself |
 | Evaluation harness | Pair scoring, multi-run spread, instability, and the held-out set's own invariants |
-| Database and API policy | Flyway V1–V13, Actuator, Swagger and N+1 query counts |
+| Database and API policy | Flyway V1–V18, Actuator, Swagger and N+1 query counts |
 
 The S3 backend is tested against S3Mock through Testcontainers. This checks
 uploads, reads, deletes and listing against a separate S3 API implementation,
@@ -330,7 +334,7 @@ Neon PostgreSQL
 |---|---|
 | Admin web | Publicly available over HTTPS on Cloudflare Pages |
 | Backend | Northflank Free Docker instance; readiness reports `UP` |
-| Database | Managed Neon PostgreSQL, migrated to V13 |
+| Database | Managed Neon PostgreSQL in Sydney, migrated to V18 |
 | AI | Gemini v2 active, with `keyword-v1` fallback |
 | Secrets | Local `.env` is ignored by Git; cloud values use platform environment variables |
 | CI | Backend verify and Docker build; admin lint and build |
@@ -400,6 +404,11 @@ Local development exposes `/swagger-ui.html` and `/v3/api-docs`; the production 
 | V11 | case evidence snapshot | Freeze reported text, author and media before later edits |
 | V12 | investigation lease | Reserve a case before paid calls and recover after lease expiry |
 | V13 | comment page index | Partial keyset index over visible roots and replies in a post |
+| V14 | community and virtual market | Social relations, wallets, idempotent trades, candles and leaderboard |
+| V15 | forum presentation and demo provenance | Categories, pins and imported-data provenance |
+| V16 | account preferences and avatar | Account-owned avatars, private language and theme settings |
+| V17 | content translations | Persist translated content keyed by source hash |
+| V18 | authored posts cursor index | Partial index for author cursor pagination across forums |
 
 `reports.target_id` and `moderation_cases.target_id` may refer to either a post or a comment, so they cannot both use a conventional database foreign key. The service validates the target on write. `audit_log.actor_id` deliberately has no user foreign key, preserving the audit history after account deletion. Raw AI responses and audit payloads use JSONB to accommodate different action structures.
 
